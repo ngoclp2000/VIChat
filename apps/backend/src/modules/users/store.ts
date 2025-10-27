@@ -27,6 +27,14 @@ export interface TenantUserDirectoryEntry {
   displayName: string;
 }
 
+export interface CreateTenantUserInput {
+  userId: string;
+  displayName: string;
+  password: string;
+  roles?: string[];
+  status?: 'active' | 'disabled';
+}
+
 const COLLECTION_NAME = 'tenantUsers';
 
 interface SeedUserInput {
@@ -178,6 +186,62 @@ export async function getTenantUser(db: Db, tenantId: string, userId: string): P
   const collection = db.collection<TenantUserRecord>(COLLECTION_NAME);
   const user = await collection.findOne({ tenantId, userId });
   return user ?? null;
+}
+
+export async function createTenantUser(
+  db: Db,
+  tenantId: string,
+  input: CreateTenantUserInput
+): Promise<TenantUserProfile> {
+  const collection = db.collection<TenantUserRecord>(COLLECTION_NAME);
+  const userId = input.userId.trim();
+  const displayName = (input.displayName || input.userId).trim();
+  const password = input.password.trim();
+
+  if (!userId) {
+    throw new Error('USER_ID_REQUIRED');
+  }
+
+  if (!password) {
+    throw new Error('PASSWORD_REQUIRED');
+  }
+
+  const existing = await collection.findOne({ tenantId, userId });
+  if (existing) {
+    throw new Error('USER_EXISTS');
+  }
+
+  const roles = Array.from(
+    new Set(
+      (input.roles ?? ['member'])
+        .map((role) => role.trim())
+        .filter((role): role is string => Boolean(role))
+    )
+  );
+
+  const now = new Date();
+  const record: TenantUserRecord = {
+    _id: new ObjectId(),
+    tenantId,
+    userId,
+    displayName: displayName || userId,
+    passwordHash: hashSecret(password),
+    roles,
+    status: input.status ?? 'active',
+    createdAt: now,
+    updatedAt: now,
+    lastLoginAt: null
+  };
+
+  await collection.insertOne(record);
+
+  return {
+    userId: record.userId,
+    displayName: record.displayName,
+    roles: record.roles,
+    status: record.status,
+    lastLoginAt: record.lastLoginAt ?? null
+  };
 }
 
 function hashSecret(secret: string): string {
