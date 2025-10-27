@@ -12,8 +12,10 @@
   "dependencies": {
     "@vichat/sdk": "file:../../packages/sdk-web",
     "@vichat/shared": "file:../../packages/shared",
+    "lucide-react": "^0.363.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-textarea-autosize": "^8.5.0"
   },
   "devDependencies": {
     "eslint": "^8.56.0",
