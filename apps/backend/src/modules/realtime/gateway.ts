@@ -1,6 +1,6 @@
-import type { FastifyInstance } from 'fastify';
-import type { FastifyWebsocketOptions } from '@fastify/websocket';
+import { WebSocketServer } from 'ws';
 import type WebSocket from 'ws';
+import type { FastifyInstance } from 'fastify';
 import { nanoid } from 'nanoid';
 import type { VerifiedToken } from '../auth/service';
 
@@ -10,43 +10,39 @@ interface ConnectionContext {
   token: VerifiedToken;
 }
 
+type UpgradeRequest = {
+  url?: string | null;
+  headers: Record<string, string | string[] | undefined>;
+};
+
 export function registerRealtimeGateway(app: FastifyInstance): void {
   const connections = new Map<string, ConnectionContext>();
+  const wss = new WebSocketServer({ noServer: true });
 
-  const options: FastifyWebsocketOptions = {
-    options: {
-      clientTracking: false
-    }
-  };
-
-  app.get('/realtime', { websocket: options }, (connection, request) => {
-    const query = request.query as { auth?: string };
-    const auth = query?.auth ?? request.headers['sec-websocket-protocol'];
-    if (typeof auth !== 'string') {
-      connection.socket.close(4001, 'Missing auth token');
+  app.server.on('upgrade', (request, socket, head) => {
+    if (!shouldHandleUpgrade(request)) {
+      socket.destroy();
       return;
     }
 
-    let token: VerifiedToken;
-    try {
-      token = app.verifyJwt(auth) as VerifiedToken;
-    } catch (err) {
-      connection.socket.close(4002, 'Invalid token');
-      app.log.warn({ err }, 'Failed to verify websocket token');
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request as UpgradeRequest);
+    });
+  });
+
+  wss.on('connection', (socket, request) => {
+    const token = authenticate(app, socket, request);
+    if (!token) {
+      socket.close(4002, 'Invalid token');
       return;
     }
 
     const id = nanoid();
-    const ctx: ConnectionContext = {
-      id,
-      socket: connection.socket,
-      token
-    };
-
+    const ctx: ConnectionContext = { id, socket, token };
     connections.set(id, ctx);
     app.log.info({ id, token }, 'Realtime connection established');
 
-    connection.socket.on('message', (data) => {
+    socket.on('message', (data) => {
       try {
         const payload = JSON.parse(String(data));
         handleMessage(app, ctx, payload);
@@ -55,7 +51,7 @@ export function registerRealtimeGateway(app: FastifyInstance): void {
       }
     });
 
-    connection.socket.on('close', () => {
+    socket.on('close', () => {
       connections.delete(id);
       app.log.info({ id }, 'Realtime connection closed');
     });
@@ -64,7 +60,9 @@ export function registerRealtimeGateway(app: FastifyInstance): void {
   function broadcast(tenantId: string, message: unknown): void {
     for (const ctx of connections.values()) {
       if (ctx.token.tenantId !== tenantId) continue;
-      ctx.socket.send(JSON.stringify(message));
+      if (ctx.socket.readyState === ctx.socket.OPEN) {
+        ctx.socket.send(JSON.stringify(message));
+      }
     }
   }
 
@@ -82,6 +80,33 @@ export function registerRealtimeGateway(app: FastifyInstance): void {
   app.decorate('broadcastToTenant', (tenantId: string, message: unknown) => {
     broadcast(tenantId, message);
   });
+}
+
+function shouldHandleUpgrade(request: UpgradeRequest): boolean {
+  if (!request.url) return false;
+  try {
+    const url = new URL(request.url, 'http://localhost');
+    return url.pathname === '/realtime';
+  } catch {
+    return false;
+  }
+}
+
+function authenticate(app: FastifyInstance, socket: WebSocket, request: UpgradeRequest): VerifiedToken | null {
+  if (!request.url) return null;
+  try {
+    const url = new URL(request.url, 'http://localhost');
+    const auth = url.searchParams.get('auth') ?? request.headers['sec-websocket-protocol'];
+    if (typeof auth !== 'string') {
+      socket.close(4001, 'Missing auth token');
+      return null;
+    }
+
+    return app.verifyJwt(auth) as VerifiedToken;
+  } catch (err) {
+    app.log.warn({ err }, 'Failed to verify websocket token');
+    return null;
+  }
 }
 
 declare module 'fastify' {

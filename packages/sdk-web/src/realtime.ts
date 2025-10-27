@@ -1,12 +1,11 @@
 import EventEmitter from 'eventemitter3';
-import WebSocket from 'isomorphic-ws';
 
 export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected';
 
 export interface RealtimeOptions {
   url: string;
   token: string;
-  protocols?: string[];
+  protocols?: string | string[];
   autoReconnect?: boolean;
   retryDelays?: number[];
 }
@@ -18,8 +17,8 @@ export interface OutgoingMessage {
 
 interface RealtimeEvents {
   open: () => void;
-  close: (event: WebSocket.CloseEvent) => void;
-  error: (event: WebSocket.ErrorEvent) => void;
+  close: (event: CloseEvent) => void;
+  error: (event: Event) => void;
   message: (data: unknown) => void;
   state: (state: ConnectionState) => void;
 }
@@ -51,7 +50,7 @@ export class RealtimeClient extends EventEmitter<RealtimeEvents> {
     const authUrl = new URL(url);
     authUrl.searchParams.set('auth', token);
 
-    this.ws = new WebSocket(authUrl.toString(), protocols);
+    this.ws = this.createSocket(authUrl.toString(), protocols);
     this.ws.onopen = () => {
       this.retryAttempt = 0;
       this.setState('connected');
@@ -65,7 +64,7 @@ export class RealtimeClient extends EventEmitter<RealtimeEvents> {
       }
     };
     this.ws.onerror = (event) => {
-      this.emit('error', event as WebSocket.ErrorEvent);
+      this.emit('error', event);
     };
     this.ws.onmessage = (event) => {
       try {
@@ -90,6 +89,14 @@ export class RealtimeClient extends EventEmitter<RealtimeEvents> {
     this.ws?.close();
     this.ws = undefined;
     this.setState('disconnected');
+  }
+
+  private createSocket(url: string, protocols?: string | string[]): WebSocket {
+    if (typeof WebSocket === 'undefined') {
+      throw new Error('WebSocket API is not available in this environment');
+    }
+
+    return protocols ? new WebSocket(url, protocols) : new WebSocket(url);
   }
 
   private scheduleReconnect(): void {

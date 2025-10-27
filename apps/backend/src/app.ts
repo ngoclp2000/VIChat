@@ -1,7 +1,4 @@
 import Fastify from 'fastify';
-import cors from '@fastify/cors';
-import websocket from '@fastify/websocket';
-import rateLimit from 'fastify-rate-limit';
 import { getEnv } from './config/env';
 import { registerRealtimeGateway } from './modules/realtime/gateway';
 import { seedTenants } from './modules/tenants/store';
@@ -18,13 +15,59 @@ export async function createApp() {
 
   app.decorate('verifyJwt', (token: string) => verifyAccessToken(token));
 
-  await app.register(cors, { origin: true, credentials: true });
-  await app.register(rateLimit, {
-    max: 1000,
-    timeWindow: '1 minute',
-    keyGenerator: (request) => request.headers['x-tenant-id']?.toString() ?? request.ip
+  app.addHook('onRequest', (request, reply, done) => {
+    const origin = request.headers.origin ?? '*';
+    reply.header('Access-Control-Allow-Origin', origin);
+    reply.header('Vary', 'Origin');
+    reply.header('Access-Control-Allow-Credentials', 'true');
+    reply.header(
+      'Access-Control-Allow-Headers',
+      (request.headers['access-control-request-headers'] as string | undefined) ?? 'authorization,content-type'
+    );
+    reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+
+    if (request.method === 'OPTIONS') {
+      reply.status(204).send();
+      return;
+    }
+
+    done();
   });
-  await app.register(websocket);
+
+  const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+  const rateLimitWindowMs = 60_000;
+  const rateLimitMax = 1000;
+
+  app.addHook('onRequest', (request, reply, done) => {
+    const key = request.headers['x-tenant-id']?.toString() ?? request.ip ?? 'anonymous';
+    const now = Date.now();
+    const entry = rateLimitStore.get(key);
+
+    if (!entry || entry.resetAt <= now) {
+      rateLimitStore.set(key, { count: 1, resetAt: now + rateLimitWindowMs });
+      reply.header('X-RateLimit-Limit', rateLimitMax);
+      reply.header('X-RateLimit-Remaining', rateLimitMax - 1);
+      reply.header('X-RateLimit-Reset', Math.ceil((now + rateLimitWindowMs) / 1000));
+      done();
+      return;
+    }
+
+    if (entry.count >= rateLimitMax) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+      reply.header('Retry-After', retryAfterSeconds);
+      reply.header('X-RateLimit-Limit', rateLimitMax);
+      reply.header('X-RateLimit-Remaining', 0);
+      reply.header('X-RateLimit-Reset', Math.ceil(entry.resetAt / 1000));
+      reply.status(429).send({ message: 'Too many requests' });
+      return;
+    }
+
+    entry.count += 1;
+    reply.header('X-RateLimit-Limit', rateLimitMax);
+    reply.header('X-RateLimit-Remaining', Math.max(0, rateLimitMax - entry.count));
+    reply.header('X-RateLimit-Reset', Math.ceil(entry.resetAt / 1000));
+    done();
+  });
 
   registerRealtimeGateway(app);
 
