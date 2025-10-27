@@ -13,6 +13,11 @@ export interface ConversationDescriptor {
   type: 'dm' | 'group';
   tenantId: TenantScopedId;
   members: string[];
+  name?: string;
+  metadata?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string;
 }
 
 export interface MessagePayload {

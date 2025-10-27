@@ -4,6 +4,8 @@ import { registerRealtimeGateway } from './modules/realtime/gateway';
 import { seedTenants } from './modules/tenants/store';
 import { registerConversationRoutes } from './modules/conversations/router';
 import { issueAccessToken, validateTokenRequest, verifyAccessToken } from './modules/auth/service';
+import { connectMongo, closeMongo } from './config/mongo';
+import { registerClientRoutes } from './modules/clients/router';
 
 export async function createApp() {
   const env = getEnv();
@@ -11,9 +13,15 @@ export async function createApp() {
     logger: true
   });
 
+  const mongo = await connectMongo();
   seedTenants();
 
   app.decorate('verifyJwt', (token: string) => verifyAccessToken(token));
+  app.decorate('mongo', mongo);
+
+  app.addHook('onClose', async () => {
+    await closeMongo();
+  });
 
   app.addHook('onRequest', (request, reply, done) => {
     const origin = request.headers.origin ?? '*';
@@ -88,6 +96,7 @@ export async function createApp() {
   });
 
   await registerConversationRoutes(app);
+  await registerClientRoutes(app);
 
   return app;
 }

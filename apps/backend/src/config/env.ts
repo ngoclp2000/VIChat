@@ -8,6 +8,8 @@ export interface Env {
   JWT_AUDIENCE: string;
   JWT_SECRET: string;
   REALTIME_PUBLIC_URL: string;
+  MONGODB_URI: string;
+  MONGODB_DB: string;
 }
 
 export function getEnv(): Env {
@@ -16,6 +18,8 @@ export function getEnv(): Env {
     JWT_ISSUER: process.env.JWT_ISSUER ?? 'vichat',
     JWT_AUDIENCE: process.env.JWT_AUDIENCE ?? 'chatkit',
     JWT_SECRET: process.env.JWT_SECRET ?? 'local-dev-secret',
-    REALTIME_PUBLIC_URL: process.env.REALTIME_PUBLIC_URL ?? 'ws://localhost:4000/realtime'
+    REALTIME_PUBLIC_URL: process.env.REALTIME_PUBLIC_URL ?? 'ws://localhost:4000/realtime',
+    MONGODB_URI: process.env.MONGODB_URI ?? 'mongodb://localhost:27017',
+    MONGODB_DB: process.env.MONGODB_DB ?? 'vichat'
   };
 }
