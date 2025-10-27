@@ -12,6 +12,10 @@ import { registerUserRoutes } from './modules/users/router';
 
 export async function createApp() {
   const env = getEnv();
+  const encryptionKey = Buffer.from(env.MESSAGE_ENCRYPTION_KEY, 'base64');
+  if (encryptionKey.length !== 32) {
+    throw new Error('MESSAGE_ENCRYPTION_KEY must be a base64-encoded 32-byte key');
+  }
   const app = Fastify({
     logger: true
   });
@@ -22,6 +26,7 @@ export async function createApp() {
 
   app.decorate('verifyJwt', (token: string) => verifyAccessToken(token));
   app.decorate('mongo', mongo);
+  app.decorate('messageEncryptionKey', encryptionKey);
 
   app.addHook('onClose', async () => {
     await closeMongo();
