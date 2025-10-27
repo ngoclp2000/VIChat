@@ -65,7 +65,12 @@ export async function registerConversationRoutes(app: FastifyInstance): Promise<
     const token = authHeader.replace('Bearer ', '');
     const verified = verifyAccessToken(token);
 
-    const member = (request.query as Record<string, string | undefined>)?.member ?? verified.userId;
+    const requestedMember = (request.query as Record<string, string | undefined>)?.member;
+    if (requestedMember && requestedMember !== verified.userId) {
+      return reply.status(403).send({ message: 'Forbidden' });
+    }
+
+    const member = requestedMember ?? verified.userId;
     const records = await listConversationsForMember(app.mongo.db, verified.tenantId, member);
     return reply.send(records.map(toConversationResponse));
   });
@@ -82,6 +87,10 @@ export async function registerConversationRoutes(app: FastifyInstance): Promise<
     const record = await getConversationById(app.mongo.db, verified.tenantId, id);
     if (!record) {
       return reply.status(404).send({ message: 'Conversation not found' });
+    }
+
+    if (!record.members.includes(verified.userId)) {
+      return reply.status(403).send({ message: 'Forbidden' });
     }
 
     return reply.send(toConversationResponse(record));
