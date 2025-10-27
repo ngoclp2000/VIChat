@@ -1,12 +1,15 @@
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import type { Db } from 'mongodb';
 import { getEnv } from '../../config/env';
 import { getTenantByClientId } from '../tenants/store';
+import { verifyTenantUserSecret } from '../users/store';
 
 const tokenRequestSchema = z.object({
   clientId: z.string(),
   tenantId: z.string(),
   userId: z.string(),
+  userSecret: z.string().min(6),
   scopes: z.array(z.string()).default([])
 });
 
@@ -21,20 +24,26 @@ export function validateTokenRequest(payload: unknown): TokenRequest {
   return tokenRequestSchema.parse(payload);
 }
 
-export function issueAccessToken(request: TokenRequest): TokenResponse {
+export async function issueAccessToken(db: Db, request: TokenRequest): Promise<TokenResponse> {
   const env = getEnv();
   const tenant = getTenantByClientId(request.clientId);
   if (!tenant || tenant.id !== request.tenantId) {
     throw new Error('Invalid tenant or clientId');
   }
 
+  const user = await verifyTenantUserSecret(db, request.tenantId, request.userId, request.userSecret);
+  if (!user) {
+    throw new Error('Invalid user credentials');
+  }
+
   const expiresInSeconds = 60 * 15;
   const token = jwt.sign(
     {
-      sub: request.userId,
+      sub: user.userId,
       tenantId: request.tenantId,
       scopes: request.scopes,
-      clientId: request.clientId
+      clientId: request.clientId,
+      roles: user.roles
     },
     env.JWT_SECRET,
     {
@@ -55,6 +64,7 @@ export interface VerifiedToken {
   userId: string;
   scopes: string[];
   clientId: string;
+  roles: string[];
 }
 
 export function verifyAccessToken(token: string): VerifiedToken {
@@ -68,6 +78,7 @@ export function verifyAccessToken(token: string): VerifiedToken {
     tenantId: decoded.tenantId as string,
     userId: decoded.sub as string,
     scopes: (decoded.scopes as string[]) ?? [],
-    clientId: decoded.clientId as string
+    clientId: decoded.clientId as string,
+    roles: (decoded.roles as string[]) ?? []
   };
 }

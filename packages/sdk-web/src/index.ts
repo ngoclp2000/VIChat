@@ -5,6 +5,7 @@ import type {
   DeviceInfo,
   MessagePayload,
   PresenceEvent,
+  StickerPayload,
   SyncCursor,
   TypingEvent
 } from '@vichat/shared';
@@ -32,6 +33,7 @@ export interface ConversationHandle {
   id: string;
   descriptor: ConversationDescriptor;
   sendText(text: string, metadata?: Record<string, unknown>): Promise<MessagePayload>;
+  sendSticker(sticker: StickerPayload, metadata?: Record<string, unknown>): Promise<MessagePayload>;
   on(event: 'message', listener: (message: MessagePayload) => void): this;
   on(event: 'typing', listener: (typing: TypingEvent) => void): this;
   off(event: 'message' | 'typing', listener: (...args: unknown[]) => void): this;
@@ -79,17 +81,31 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
 
   private readonly cursor: SyncCursor;
 
-  private constructor(options: ChatKitInitOptions, realtime: RealtimeClient, outbox: OutboxStorage<SendRequest>) {
+  private readonly userId: string;
+
+  private constructor(
+    options: ChatKitInitOptions,
+    realtime: RealtimeClient,
+    outbox: OutboxStorage<SendRequest>,
+    userId: string
+  ) {
     super();
     this.options = options;
     this.realtime = realtime;
     this.outbox = outbox;
+    this.userId = userId;
     this.cursor = {
       updatedAt: new Date().toISOString()
     };
 
     this.realtime.on('message', (envelope) => this.handleMessage(envelope as MessageEnvelope));
-    this.realtime.on('error', (evt) => this.emit('error', new Error(String((evt as Error).message ?? evt))));
+    this.realtime.on('error', (evt) => {
+      const error =
+        evt instanceof Error
+          ? evt
+          : new Error(String((evt as { message?: unknown })?.message ?? evt));
+      this.emit('error', error);
+    });
     this.realtime.on('state', (state) => this.emit('state', state));
   }
 
@@ -101,7 +117,8 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
       autoReconnect: true
     });
 
-    const kit = new ChatKit(options, realtime, outbox);
+    const userId = ChatKit.extractUserId(options.token);
+    const kit = new ChatKit(options, realtime, outbox, userId);
     realtime.connect();
     await kit.flushOutbox();
     return kit;
@@ -115,6 +132,7 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
       id: descriptor.id,
       descriptor,
       sendText: (text, metadata) => this.sendText(descriptor, text, metadata),
+      sendSticker: (sticker, metadata) => this.sendSticker(descriptor, sticker, metadata),
       on: (event, listener) => {
         emitter.on(event, listener as never);
         return handle;
@@ -128,12 +146,18 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
     return handle;
   }
 
+  disconnect(): void {
+    this.realtime.disconnect();
+    this.removeAllListeners();
+    this.conversations.clear();
+  }
+
   async sendText(conversation: ConversationDescriptor, text: string, metadata?: Record<string, unknown>): Promise<MessagePayload> {
     const id = randomId();
     const message: MessagePayload = {
       id,
       conversationId: conversation.id,
-      senderId: this.options.device.id,
+      senderId: this.userId,
       senderDeviceId: this.options.device.id,
       sentAt: new Date().toISOString(),
       type: 'text',
@@ -151,6 +175,39 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
       payload: {
         message
       }
+    };
+
+    await this.outbox.put(queued);
+    void this.trySendQueued();
+    return message;
+  }
+
+  async sendSticker(
+    conversation: ConversationDescriptor,
+    sticker: StickerPayload,
+    metadata?: Record<string, unknown>
+  ): Promise<MessagePayload> {
+    const id = randomId();
+    const message: MessagePayload = {
+      id,
+      conversationId: conversation.id,
+      senderId: this.userId,
+      senderDeviceId: this.options.device.id,
+      sentAt: new Date().toISOString(),
+      type: 'sticker',
+      body: {
+        ciphertext: '',
+        scheme: this.options.e2ee?.protocol ?? 'signal',
+        keyId: `${conversation.id}:${this.options.device.id}`
+      },
+      metadata,
+      sticker
+    };
+
+    const queued: QueuedMessage<SendRequest> = {
+      id,
+      createdAt: Date.now(),
+      payload: { message }
     };
 
     await this.outbox.put(queued);
@@ -181,7 +238,7 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
   setTyping(conversationId: string, isTyping: boolean): void {
     const payload: TypingEvent = {
       conversationId,
-      userId: this.options.device.id,
+      userId: this.userId,
       isTyping
     };
     this.sendEnvelope({ type: 'typing', payload });
@@ -246,6 +303,43 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
     } catch (err) {
       this.emit('error', err as Error);
     }
+  }
+
+  private static extractUserId(token: string): string {
+    try {
+      const segments = token.split('.');
+      if (segments.length < 2) {
+        throw new Error('Malformed JWT');
+      }
+
+      const payloadSegment = segments[1] ?? '';
+      const decodedPayload = ChatKit.decodeBase64Url(payloadSegment);
+      const decoded = JSON.parse(decodedPayload) as { sub?: string };
+      const userId = decoded.sub;
+      if (!userId) {
+        throw new Error('Missing subject claim');
+      }
+      return userId;
+    } catch (err) {
+      throw new Error(`Failed to decode access token: ${(err as Error).message ?? err}`);
+    }
+  }
+
+  private static decodeBase64Url(segment: string): string {
+    const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+
+    if (typeof globalThis.atob === 'function') {
+      return globalThis.atob(padded);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const maybeBuffer = (globalThis as any).Buffer as { from?: (value: string, encoding: string) => { toString: (encoding: string) => string } } | undefined;
+    if (maybeBuffer?.from) {
+      return maybeBuffer.from(padded, 'base64').toString('utf8');
+    }
+
+    throw new Error('No base64 decoder available');
   }
 }
 
