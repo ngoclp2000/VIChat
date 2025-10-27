@@ -146,6 +146,12 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
     return handle;
   }
 
+  disconnect(): void {
+    this.realtime.disconnect();
+    this.removeAllListeners();
+    this.conversations.clear();
+  }
+
   async sendText(conversation: ConversationDescriptor, text: string, metadata?: Record<string, unknown>): Promise<MessagePayload> {
     const id = randomId();
     const message: MessagePayload = {

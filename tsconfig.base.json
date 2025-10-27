@@ -14,7 +14,9 @@
     "paths": {
       "@vichat/shared/*": ["packages/shared/src/*"],
       "@vichat/sdk": ["packages/sdk-web/src/index.ts"],
-      "@vichat/sdk/*": ["packages/sdk-web/src/*"]
+      "@vichat/sdk/*": ["packages/sdk-web/src/*"],
+      "react-select": ["packages/react-select/src/index.tsx"],
+      "react-select/*": ["packages/react-select/src/*"]
     }
   }
 }

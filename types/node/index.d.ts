@@ -21,6 +21,12 @@ declare const Buffer: {
   byteLength(input: string, encoding?: string): number;
 };
 
+declare const __dirname: string;
+
+declare module 'path' {
+  export function resolve(...segments: string[]): string;
+}
+
 declare module 'http' {
   export interface IncomingMessage {
     url?: string | null;
