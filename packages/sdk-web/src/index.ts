@@ -52,8 +52,7 @@ type MessageEnvelope = {
 };
 
 interface SendRequest {
-  conversationId: string;
-  message: Omit<MessagePayload, 'sentAt' | 'deliveredAt' | 'readAt'>;
+  message: MessagePayload;
 }
 
 interface ConversationEvents {
@@ -150,11 +149,7 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
       id,
       createdAt: Date.now(),
       payload: {
-        conversationId: conversation.id,
-        message: {
-          ...message,
-          body: message.body
-        }
+        message
       }
     };
 
@@ -199,7 +194,7 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
     for (const item of batch) {
       this.sendEnvelope({
         type: 'message',
-        payload: item.payload
+        payload: item.payload.message
       });
     }
 
@@ -213,7 +208,11 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
   private handleMessage(envelope: MessageEnvelope): void {
     switch (envelope.type) {
       case 'message': {
-        const message = envelope.payload as MessagePayload;
+        const payload = envelope.payload as MessagePayload | { message: MessagePayload };
+        const message =
+          typeof payload === 'object' && payload && 'message' in payload
+            ? (payload.message as MessagePayload)
+            : (payload as MessagePayload);
         const emitter = this.conversations.get(message.conversationId);
         emitter?.emit('message', message);
         this.emit('message', message);

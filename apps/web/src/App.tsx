@@ -223,13 +223,14 @@ export default function App() {
             )}
             {messages.map((message) => {
               const isMine = message.senderId === currentDeviceId;
+              const ciphertext = message.body?.ciphertext ?? '';
               return (
                 <article key={message.id} className={`bubble ${isMine ? 'bubble--out' : 'bubble--in'}`}>
                   <header>
                     <span className="bubble-author">{isMine ? 'Bạn' : message.senderId}</span>
                     <time>{formatTime(message.sentAt)}</time>
                   </header>
-                  <p>{message.body.ciphertext}</p>
+                  <p>{ciphertext || 'Tin nhắn trống'}</p>
                 </article>
               );
             })}
