@@ -29,8 +29,9 @@ export interface MessagePayload {
   deliveredAt?: string;
   readAt?: string;
   body: CipherEnvelope;
-  type: 'text' | 'media' | 'system';
+  type: 'text' | 'media' | 'system' | 'sticker';
   metadata?: Record<string, unknown>;
+  sticker?: StickerPayload;
 }
 
 export interface CipherEnvelope {
@@ -38,6 +39,13 @@ export interface CipherEnvelope {
   scheme: 'signal' | 'mls';
   keyId: string;
   media?: MediaAttachment[];
+}
+
+export interface StickerPayload {
+  id: string;
+  url: string;
+  name?: string;
+  pack?: string;
 }
 
 export interface MediaAttachment {

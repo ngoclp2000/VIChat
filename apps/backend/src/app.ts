@@ -6,6 +6,8 @@ import { registerConversationRoutes } from './modules/conversations/router';
 import { issueAccessToken, validateTokenRequest, verifyAccessToken } from './modules/auth/service';
 import { connectMongo, closeMongo } from './config/mongo';
 import { registerClientRoutes } from './modules/clients/router';
+import { seedUsers } from './modules/users/store';
+import { registerUserRoutes } from './modules/users/router';
 
 export async function createApp() {
   const env = getEnv();
@@ -15,6 +17,7 @@ export async function createApp() {
 
   const mongo = await connectMongo();
   seedTenants();
+  await seedUsers(mongo.db);
 
   app.decorate('verifyJwt', (token: string) => verifyAccessToken(token));
   app.decorate('mongo', mongo);
@@ -87,7 +90,7 @@ export async function createApp() {
   app.post('/v1/auth/token', async (request, reply) => {
     try {
       const parsed = validateTokenRequest(request.body);
-      const token = issueAccessToken(parsed);
+      const token = await issueAccessToken(app.mongo.db, parsed);
       return reply.status(200).send(token);
     } catch (err) {
       request.log.error({ err }, 'Failed to issue token');
@@ -97,6 +100,7 @@ export async function createApp() {
 
   await registerConversationRoutes(app);
   await registerClientRoutes(app);
+  await registerUserRoutes(app);
 
   return app;
 }
