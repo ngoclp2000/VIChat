@@ -970,6 +970,14 @@ export default function App() {
                 )}
                 isDisabled={!memberOptions.length}
               />
+              <datalist id="tenant-users">
+                {tenantUsers.map((user) => (
+                  <option key={user.userId} value={user.userId}>
+                    {user.displayName}
+                  </option>
+                ))}
+              </datalist>
+              <small className="field-hint">Chọn từ danh sách người dùng của tenant để đảm bảo chính xác.</small>
             </label>
             <button type="submit" disabled={!isAuthenticated}>
               Tạo mới
