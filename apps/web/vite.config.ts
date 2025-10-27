@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import path from 'path';
 
 export default defineConfig({
   esbuild: {
@@ -11,7 +12,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': '/src'
+      '@': '/src',
+      'react-select': path.resolve(__dirname, '../..', 'packages/react-select/src/index.tsx')
     }
   }
 });
