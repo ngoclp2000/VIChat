@@ -111,9 +111,12 @@ export function registerRealtimeGateway(app: FastifyInstance): void {
     });
   });
 
-  function broadcast(tenantId: string, message: unknown): void {
+  function broadcast(tenantId: string, message: unknown, allowedUsers?: Iterable<string>): void {
+    const allowed = allowedUsers ? new Set(allowedUsers) : undefined;
+
     for (const ctx of connections.values()) {
       if (ctx.token.tenantId !== tenantId) continue;
+      if (allowed && !allowed.has(ctx.token.userId)) continue;
       if (ctx.socket.readyState === ctx.socket.OPEN) {
         ctx.socket.send(JSON.stringify(message));
       }
@@ -185,7 +188,7 @@ export function registerRealtimeGateway(app: FastifyInstance): void {
       await touchConversation(app.mongo.db, ctx.token.tenantId, parsed.conversationId, messageRecord.sentAt);
 
       const response = toMessagePayload(messageRecord);
-      broadcast(ctx.token.tenantId, { type: 'message', payload: response });
+      broadcast(ctx.token.tenantId, { type: 'message', payload: response }, conversation.members);
     } catch (err) {
       app.log.warn({ err }, 'Failed to process inbound message');
       if (ctx.socket.readyState === ctx.socket.OPEN) {
@@ -202,8 +205,8 @@ export function registerRealtimeGateway(app: FastifyInstance): void {
     }
   }
 
-  app.decorate('broadcastToTenant', (tenantId: string, message: unknown) => {
-    broadcast(tenantId, message);
+  app.decorate('broadcastToTenant', (tenantId: string, message: unknown, allowedUsers?: Iterable<string>) => {
+    broadcast(tenantId, message, allowedUsers);
   });
 }
 
@@ -243,7 +246,7 @@ function authenticate(app: FastifyInstance, socket: WebSocket, request: UpgradeR
 
 declare module 'fastify' {
   interface FastifyInstance {
-    broadcastToTenant: (tenantId: string, message: unknown) => void;
+    broadcastToTenant: (tenantId: string, message: unknown, allowedUsers?: Iterable<string>) => void;
     verifyJwt: (token: string) => VerifiedToken;
   }
 }

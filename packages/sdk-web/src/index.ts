@@ -248,14 +248,24 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
     const batch = await this.outbox.take(10);
     if (!batch.length) return;
 
+    const sentIds: string[] = [];
+
     for (const item of batch) {
-      this.sendEnvelope({
+      const sent = this.sendEnvelope({
         type: 'message',
         payload: item.payload.message
       });
+
+      if (!sent) {
+        break;
+      }
+
+      sentIds.push(item.id);
     }
 
-    await this.outbox.delete(batch.map((item) => item.id));
+    if (sentIds.length > 0) {
+      await this.outbox.delete(sentIds);
+    }
   }
 
   private async flushOutbox(): Promise<void> {
@@ -297,11 +307,13 @@ export class ChatKit extends EventEmitter<ChatKitEvents> {
     }
   }
 
-  private sendEnvelope(envelope: MessageEnvelope): void {
+  private sendEnvelope(envelope: MessageEnvelope): boolean {
     try {
       this.realtime.send({ action: 'envelope', payload: envelope });
+      return true;
     } catch (err) {
       this.emit('error', err as Error);
+      return false;
     }
   }
 
