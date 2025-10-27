@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { verifyAccessToken } from '../auth/service';
 import { getTenantByClientId } from '../tenants/store';
-import { listTenantUsers } from './store';
+import { listPublicTenantUsers, listTenantUsers } from './store';
 
 export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
   app.get('/v1/tenants/:tenantId/users', async (request, reply) => {
@@ -9,15 +9,19 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
     const authHeader = request.headers.authorization;
 
     if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.replace('Bearer ', '');
-      const verified = verifyAccessToken(token);
+      try {
+        const token = authHeader.replace('Bearer ', '');
+        const verified = verifyAccessToken(token);
 
-      if (tenantId !== verified.tenantId) {
-        return reply.status(403).send({ message: 'Forbidden' });
+        if (tenantId !== verified.tenantId) {
+          return reply.status(403).send({ message: 'Forbidden' });
+        }
+
+        const users = await listTenantUsers(app.mongo.db, tenantId);
+        return reply.send(users);
+      } catch {
+        return reply.status(401).send({ message: 'Invalid token' });
       }
-
-      const users = await listTenantUsers(app.mongo.db, tenantId);
-      return reply.send(users);
     }
 
     const { clientId } = request.query as { clientId?: string };
@@ -30,7 +34,7 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(403).send({ message: 'Forbidden' });
     }
 
-    const users = await listTenantUsers(app.mongo.db, tenantId);
+    const users = await listPublicTenantUsers(app.mongo.db, tenantId);
     return reply.send(users);
   });
 }
