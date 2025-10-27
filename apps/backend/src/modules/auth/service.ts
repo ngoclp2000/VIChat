@@ -5,6 +5,17 @@ import { getEnv } from '../../config/env';
 import { getTenantByClientId } from '../tenants/store';
 import { verifyTenantUserSecret } from '../users/store';
 
+export class AuthError extends Error {
+  readonly statusCode: number;
+
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = 'AuthError';
+    this.statusCode = statusCode;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 const tokenRequestSchema = z.object({
   clientId: z.string(),
   tenantId: z.string(),
@@ -28,7 +39,12 @@ export async function issueAccessToken(db: Db, request: TokenRequest): Promise<T
   const env = getEnv();
   const tenant = getTenantByClientId(request.clientId);
   if (!tenant || tenant.id !== request.tenantId) {
-    throw new Error('Invalid tenant or clientId');
+    throw new AuthError('Không tìm thấy tenant hoặc ứng dụng phù hợp.', 400);
+  }
+
+  const user = await verifyTenantUserSecret(db, request.tenantId, request.userId, request.userSecret);
+  if (!user) {
+    throw new AuthError('Sai thông tin đăng nhập hoặc mật khẩu.', 401);
   }
 
   const user = await verifyTenantUserSecret(db, request.tenantId, request.userId, request.userSecret);

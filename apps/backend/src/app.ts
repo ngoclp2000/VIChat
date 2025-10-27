@@ -1,9 +1,10 @@
 import Fastify from 'fastify';
+import { ZodError } from 'zod';
 import { getEnv } from './config/env';
 import { registerRealtimeGateway } from './modules/realtime/gateway';
 import { seedTenants } from './modules/tenants/store';
 import { registerConversationRoutes } from './modules/conversations/router';
-import { issueAccessToken, validateTokenRequest, verifyAccessToken } from './modules/auth/service';
+import { AuthError, issueAccessToken, validateTokenRequest, verifyAccessToken } from './modules/auth/service';
 import { connectMongo, closeMongo } from './config/mongo';
 import { registerClientRoutes } from './modules/clients/router';
 import { seedUsers } from './modules/users/store';
@@ -94,7 +95,17 @@ export async function createApp() {
       return reply.status(200).send(token);
     } catch (err) {
       request.log.error({ err }, 'Failed to issue token');
-      return reply.status(400).send({ message: 'Invalid token request' });
+      if (err instanceof ZodError) {
+        const firstIssue = err.issues[0];
+        const message = firstIssue?.message ?? 'Thiếu thông tin đăng nhập hợp lệ.';
+        return reply.status(400).send({ message });
+      }
+
+      if (err instanceof AuthError) {
+        return reply.status(err.statusCode).send({ message: err.message });
+      }
+
+      return reply.status(500).send({ message: 'Không thể xử lý yêu cầu đăng nhập.' });
     }
   });
 

@@ -56,6 +56,70 @@ const stickerCatalog: StickerPayload[] = [
   }
 ];
 
+const SESSION_STORAGE_KEY = 'vichat.session';
+
+interface StoredSession {
+  token: string;
+  expiresAt: number;
+  user: {
+    userId: string;
+    displayName: string;
+    roles: string[];
+  };
+}
+
+function readStoredSession(): StoredSession | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredSession>;
+    if (
+      parsed &&
+      typeof parsed.token === 'string' &&
+      typeof parsed.expiresAt === 'number' &&
+      parsed.user &&
+      typeof parsed.user.userId === 'string' &&
+      typeof parsed.user.displayName === 'string' &&
+      Array.isArray(parsed.user.roles)
+    ) {
+      return {
+        token: parsed.token,
+        expiresAt: parsed.expiresAt,
+        user: {
+          userId: parsed.user.userId,
+          displayName: parsed.user.displayName,
+          roles: parsed.user.roles.filter((role): role is string => typeof role === 'string')
+        }
+      };
+    }
+  } catch (err) {
+    console.warn('Không thể đọc phiên lưu trữ', err);
+  }
+
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  return null;
+}
+
+function writeStoredSession(session: StoredSession | null): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (!session) {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+}
+
 function sortConversations(list: ConversationView[]): ConversationView[] {
   return list
     .slice()
@@ -117,6 +181,55 @@ export default function App() {
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const stored = readStoredSession();
+    if (!stored) {
+      return;
+    }
+
+    if (stored.expiresAt <= Date.now()) {
+      writeStoredSession(null);
+      return;
+    }
+
+    setAccessToken(stored.token);
+    setSessionUser(stored.user);
+    setSelectedLoginUser({
+      value: stored.user.userId,
+      label: stored.user.displayName,
+      roles: stored.user.roles,
+      status: 'active'
+    });
+  }, []);
+
+  const resetSession = useCallback(
+    (keepAuthError = false) => {
+      chat?.disconnect();
+      setChat(null);
+      setAccessToken('');
+      setSessionUser(null);
+      setSelectedConversationId(null);
+      setConversations([]);
+      setMessages([]);
+      setDraft('');
+      setSelectedMemberOptions([]);
+      setNewConversationName('');
+      setStatus('disconnected');
+      setSelectedLoginUser(null);
+      setLoginSecret('');
+      setError(null);
+      if (!keepAuthError) {
+        setAuthError(null);
+      }
+      writeStoredSession(null);
+    },
+    [chat]
+  );
+
+  const handleLogout = useCallback(() => {
+    resetSession(false);
+  }, [resetSession]);
 
   const userOptions = useMemo<UserOption[]>(
     () =>
@@ -354,8 +467,24 @@ export default function App() {
         });
 
         if (!initResponse.ok) {
-          const message = await initResponse.text();
-          throw new Error(message || 'Unable to register client');
+          const bodyText = await initResponse.text();
+
+          if (initResponse.status === 401) {
+            cleanupListeners?.();
+            cleanupListeners = undefined;
+            chatInstance.disconnect();
+            instance = null;
+
+            if (!isMounted) {
+              return;
+            }
+
+            resetSession(true);
+            setAuthError(bodyText.trim() || 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+            return;
+          }
+
+          throw new Error(bodyText || 'Unable to register client');
         }
 
         const payload = (await initResponse.json()) as {
@@ -415,7 +544,7 @@ export default function App() {
       }
       setChat((prev) => (prev === instance ? null : prev));
     };
-  }, [accessToken, sessionUser, handleError]);
+  }, [accessToken, sessionUser, handleError, resetSession]);
 
   useEffect(() => {
     setShowStickers(false);
@@ -610,44 +739,65 @@ export default function App() {
       });
 
       if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || 'Unable to obtain access token');
+        let detail = 'Không thể đăng nhập với thông tin đã cung cấp.';
+        try {
+          const text = await response.text();
+          if (text) {
+            try {
+              const parsed = JSON.parse(text) as { message?: unknown };
+              if (parsed && typeof parsed.message === 'string' && parsed.message.trim()) {
+                detail = parsed.message;
+              } else if (text.trim()) {
+                detail = text;
+              }
+            } catch {
+              if (text.trim()) {
+                detail = text;
+              }
+            }
+          }
+        } catch {
+          // ignore body parse failure
+        }
+
+        throw new Error(detail);
       }
 
-      const payload = (await response.json()) as { accessToken: string };
-      setAccessToken(payload.accessToken);
-      setSessionUser({
+      const payload = (await response.json()) as { accessToken: string; expiresIn?: number };
+      const identity = {
         userId: selectedLoginUser.value,
         displayName: selectedLoginUser.label,
         roles: selectedLoginUser.roles
-      });
+      };
+      setAccessToken(payload.accessToken);
+      setSessionUser(identity);
       setLoginSecret('');
       setError(null);
+      setAuthError(null);
+
+      const expiresInMs =
+        typeof payload.expiresIn === 'number' && Number.isFinite(payload.expiresIn)
+          ? payload.expiresIn * 1000
+          : 15 * 60 * 1000;
+
+      writeStoredSession({
+        token: payload.accessToken,
+        expiresAt: Date.now() + expiresInMs,
+        user: identity
+      });
     } catch (err) {
       console.error('Đăng nhập thất bại', err);
-      setAuthError('Thông tin đăng nhập không hợp lệ hoặc backend không phản hồi.');
+      const message =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Thông tin đăng nhập không hợp lệ hoặc backend không phản hồi.';
+      setAuthError(message);
       setAccessToken('');
       setSessionUser(null);
+      writeStoredSession(null);
     } finally {
       setIsAuthenticating(false);
     }
-  };
-
-  const handleLogout = () => {
-    chat?.disconnect();
-    setChat(null);
-    setAccessToken('');
-    setSessionUser(null);
-    setSelectedConversationId(null);
-    setConversations([]);
-    setMessages([]);
-    setDraft('');
-    setSelectedMemberOptions([]);
-    setNewConversationName('');
-    setStatus('disconnected');
-    setSelectedLoginUser(null);
-    setLoginSecret('');
-    setAuthError(null);
   };
 
   const currentConversationLabel = selectedConversation?.name ?? selectedConversation?.id ?? 'Chưa chọn cuộc trò chuyện';
