@@ -8,6 +8,7 @@ import {
   MessageCirclePlus,
   Send,
   ShieldCheck,
+  Smile,
   Sparkles,
   Trash2,
   User,
@@ -73,6 +74,29 @@ const stickerCatalog: StickerPayload[] = [
     name: 'Cà phê',
     url: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/2615.png'
   }
+];
+
+const emojiPalette = [
+  '😀',
+  '😁',
+  '😂',
+  '🤣',
+  '😊',
+  '😍',
+  '🤩',
+  '🤔',
+  '🙌',
+  '👍',
+  '🙏',
+  '🎉',
+  '🚀',
+  '❤️',
+  '🔥',
+  '🥳',
+  '😎',
+  '🤖',
+  '💡',
+  '📞'
 ];
 
 const SESSION_STORAGE_KEY = 'vichat.session';
@@ -192,6 +216,7 @@ export default function App() {
   const [newConversationName, setNewConversationName] = useState('');
   const [tenantUsers, setTenantUsers] = useState<TenantUserProfile[]>([]);
   const [showStickers, setShowStickers] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [loginSecret, setLoginSecret] = useState('');
   const [selectedLoginUser, setSelectedLoginUser] = useState<UserOption | null>(null);
@@ -203,6 +228,7 @@ export default function App() {
   const [isGroupNameDirty, setIsGroupNameDirty] = useState(false);
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     const stored = readStoredSession();
@@ -238,6 +264,8 @@ export default function App() {
     setDraft('');
     setSelectedMemberOptions([]);
     setNewConversationName('');
+    setShowStickers(false);
+    setShowEmojiPicker(false);
     setStatus('disconnected');
     setSelectedLoginUser(null);
     setLoginSecret('');
@@ -729,6 +757,7 @@ export default function App() {
 
   useEffect(() => {
     setShowStickers(false);
+    setShowEmojiPicker(false);
 
     if (!chat || !activeConversation) {
       setMessages([]);
@@ -805,6 +834,7 @@ export default function App() {
     applyMessageToConversation(message, true);
     setDraft('');
     setShowStickers(false);
+    setShowEmojiPicker(false);
   }, [chat, draft, selectedConversation, sessionUser, upsertMessage, applyMessageToConversation]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -819,6 +849,7 @@ export default function App() {
       upsertMessage(message);
       applyMessageToConversation(message, true);
       setShowStickers(false);
+      setShowEmojiPicker(false);
     },
     [chat, selectedConversation, sessionUser, upsertMessage, applyMessageToConversation]
   );
@@ -893,6 +924,21 @@ export default function App() {
       setError('Không thể tạo cuộc trò chuyện mới. Kiểm tra kết nối backend.');
     }
   };
+
+  const handleInsertEmoji = useCallback(
+    (emoji: string) => {
+      setDraft((prev) => `${prev}${emoji}`);
+      setShowEmojiPicker(false);
+      if (typeof window !== 'undefined') {
+        window.requestAnimationFrame(() => {
+          composerInputRef.current?.focus();
+        });
+      } else {
+        composerInputRef.current?.focus();
+      }
+    },
+    [composerInputRef]
+  );
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1163,6 +1209,11 @@ export default function App() {
                 minRows={2}
                 maxRows={6}
                 disabled={!chat || !selectedConversation || !isAuthenticated}
+                ref={composerInputRef}
+                onFocus={() => {
+                  setShowEmojiPicker(false);
+                  setShowStickers(false);
+                }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
@@ -1171,31 +1222,71 @@ export default function App() {
                 }}
               />
               <div className="composer-actions">
+                <div className="composer-quick">
+                  <button
+                    type="button"
+                    className={`composer-action ${showEmojiPicker ? 'composer-action--active' : ''}`}
+                    onClick={() => {
+                      if (!chat || !selectedConversation || !isAuthenticated) return;
+                      setShowStickers(false);
+                      setShowEmojiPicker((value) => !value);
+                    }}
+                    aria-label="Chèn emoji"
+                    aria-expanded={showEmojiPicker}
+                    disabled={!chat || !selectedConversation || !isAuthenticated}
+                  >
+                    <Smile size={18} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    className={`composer-action sticker-button ${showStickers ? 'sticker-button--active' : ''}`}
+                    onClick={() => {
+                      if (!chat || !selectedConversation || !isAuthenticated) return;
+                      setShowEmojiPicker(false);
+                      setShowStickers((value) => !value);
+                    }}
+                    aria-label="Chèn nhãn dán"
+                    aria-expanded={showStickers}
+                    disabled={!chat || !selectedConversation || !isAuthenticated}
+                  >
+                    <Sparkles size={18} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    className="composer-action composer-action--clear"
+                    onClick={() => setDraft('')}
+                    disabled={!draft}
+                    aria-label="Xóa nội dung đang nhập"
+                  >
+                    <Trash2 size={18} aria-hidden />
+                  </button>
+                </div>
                 <button
-                  type="button"
-                  className={`composer-action sticker-button ${showStickers ? 'sticker-button--active' : ''}`}
-                  onClick={() => setShowStickers((value) => !value)}
-                  aria-label="Chèn nhãn dán"
-                  disabled={!chat || !selectedConversation || !isAuthenticated}
+                  type="submit"
+                  className="composer-send"
+                  disabled={!canSendMessage}
                 >
-                  <Sparkles size={18} aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  className="composer-action composer-action--clear"
-                  onClick={() => setDraft('')}
-                  disabled={!draft}
-                  aria-label="Xóa nội dung đang nhập"
-                >
-                  <Trash2 size={18} aria-hidden />
-                </button>
-                <button type="submit" className="composer-send" disabled={!canSendMessage}>
                   <Send size={18} aria-hidden />
                   <span>Gửi</span>
                 </button>
               </div>
             </div>
-            {showStickers && (
+            {showEmojiPicker && chat && selectedConversation && isAuthenticated && (
+              <div className="emoji-panel" role="listbox" aria-label="Chọn emoji">
+                {emojiPalette.map((emoji) => (
+                  <button
+                    key={emoji}
+                    type="button"
+                    className="emoji-option"
+                    onClick={() => handleInsertEmoji(emoji)}
+                  >
+                    <span aria-hidden>{emoji}</span>
+                    <span className="sr-only">Thêm emoji {emoji}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {showStickers && chat && selectedConversation && isAuthenticated && (
               <div className="sticker-panel" role="menu">
                 {stickerCatalog.map((sticker) => (
                   <button
