@@ -47,6 +47,11 @@ export async function issueAccessToken(db: Db, request: TokenRequest): Promise<T
     throw new AuthError('Sai thông tin đăng nhập hoặc mật khẩu.', 401);
   }
 
+  const user = await verifyTenantUserSecret(db, request.tenantId, request.userId, request.userSecret);
+  if (!user) {
+    throw new Error('Invalid user credentials');
+  }
+
   const expiresInSeconds = 60 * 15;
   const token = jwt.sign(
     {
