@@ -1,5 +1,19 @@
 import { type ChangeEvent, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Select, { type MultiValue, type SingleValue } from 'react-select';
+import Select, { type SingleValue, type StylesConfig } from 'react-select';
+import TextareaAutosize from 'react-textarea-autosize';
+import {
+  Lock,
+  LogOut,
+  Menu,
+  MessageCirclePlus,
+  Send,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  User,
+  Users,
+  X
+} from 'lucide-react';
 import ChatKit from '@vichat/sdk';
 import type { ConversationDescriptor, MessagePayload, StickerPayload } from '@vichat/shared';
 import './App.css';
@@ -175,7 +189,6 @@ export default function App() {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<ConversationDescriptor | null>(null);
   const [selectedMemberOptions, setSelectedMemberOptions] = useState<UserOption[]>([]);
-  const [newConversationType, setNewConversationType] = useState<'dm' | 'group'>('dm');
   const [newConversationName, setNewConversationName] = useState('');
   const [tenantUsers, setTenantUsers] = useState<TenantUserProfile[]>([]);
   const [showStickers, setShowStickers] = useState(false);
@@ -185,6 +198,9 @@ export default function App() {
   const [sessionUser, setSessionUser] = useState<{ userId: string; displayName: string; roles: string[] } | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [creationError, setCreationError] = useState<string | null>(null);
+  const [isGroupNameDirty, setIsGroupNameDirty] = useState(false);
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -278,17 +294,155 @@ export default function App() {
     [sessionUser?.userId, userOptions]
   );
 
+  const sharedSelectStyles = useMemo(
+    () =>
+      ({
+        control: (base, state) => ({
+          ...base,
+          borderRadius: '1rem',
+          backgroundColor: 'rgba(15, 23, 42, 0.85)',
+          borderColor: state.isFocused ? 'rgba(59, 130, 246, 0.65)' : 'rgba(148, 163, 184, 0.25)',
+          boxShadow: state.isFocused ? '0 0 0 2px rgba(59, 130, 246, 0.25)' : 'none',
+          minHeight: '3.25rem',
+          cursor: 'pointer'
+        }),
+        valueContainer: (base) => ({
+          ...base,
+          padding: '0.35rem 0.75rem',
+          gap: '0.4rem'
+        }),
+        placeholder: (base) => ({
+          ...base,
+          color: 'rgba(226, 232, 240, 0.6)',
+          fontWeight: 500
+        }),
+        multiValue: (base) => ({
+          ...base,
+          borderRadius: '999px',
+          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(14, 165, 233, 0.25))',
+          color: '#e0f2fe',
+          border: '1px solid rgba(14, 165, 233, 0.35)'
+        }),
+        multiValueLabel: (base) => ({
+          ...base,
+          color: '#e0f2fe',
+          fontWeight: 600,
+          letterSpacing: '0.05em'
+        }),
+        multiValueRemove: (base) => ({
+          ...base,
+          color: '#cbd5f5',
+          ':hover': {
+            backgroundColor: 'transparent',
+            color: '#fca5a5'
+          }
+        }),
+        menu: (base) => ({
+          ...base,
+          marginTop: '0.5rem',
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          borderRadius: '1rem',
+          overflow: 'hidden',
+          border: '1px solid rgba(148, 163, 184, 0.25)',
+          boxShadow: '0 18px 36px rgba(15, 23, 42, 0.45)',
+          backdropFilter: 'blur(12px)'
+        }),
+        option: (base, state) => ({
+          ...base,
+          backgroundColor: state.isSelected
+            ? 'rgba(59, 130, 246, 0.35)'
+            : state.isFocused
+            ? 'rgba(59, 130, 246, 0.2)'
+            : 'transparent',
+          color: '#f8fafc',
+          padding: '0.65rem 0.85rem'
+        }),
+        singleValue: (base) => ({
+          ...base,
+          color: '#f8fafc',
+          fontWeight: 500
+        }),
+        input: (base) => ({
+          ...base,
+          color: '#f8fafc'
+        }),
+        indicatorsContainer: (base) => ({
+          ...base,
+          paddingRight: '0.75rem'
+        }),
+        dropdownIndicator: (base, state) => ({
+          ...base,
+          color: state.isFocused ? '#bae6fd' : 'rgba(226, 232, 240, 0.75)',
+          ':hover': {
+            color: '#bae6fd'
+          }
+        })
+      }) as StylesConfig<UserOption, true>,
+    []
+  );
+
+  const createConversationType: 'dm' | 'group' = selectedMemberOptions.length > 1 ? 'group' : 'dm';
+
+  const conversationPreviewName = useMemo(() => {
+    if (selectedMemberOptions.length < 2) {
+      return '';
+    }
+    const preview = selectedMemberOptions
+      .slice(0, 3)
+      .map((option) => option.label || option.value)
+      .join(', ');
+    return selectedMemberOptions.length > 3 ? `${preview}…` : preview;
+  }, [selectedMemberOptions]);
+
+  useEffect(() => {
+    if (createConversationType === 'group') {
+      if (!isGroupNameDirty) {
+        setNewConversationName(conversationPreviewName);
+      }
+    } else {
+      if (newConversationName) {
+        setNewConversationName('');
+      }
+      if (isGroupNameDirty) {
+        setIsGroupNameDirty(false);
+      }
+    }
+  }, [conversationPreviewName, createConversationType, isGroupNameDirty, newConversationName]);
+
+  useEffect(() => {
+    if (isCreateDialogOpen) {
+      setCreationError(null);
+      return;
+    }
+
+    setSelectedMemberOptions((prev) => (prev.length ? [] : prev));
+    setNewConversationName((prev) => (prev ? '' : prev));
+    setIsGroupNameDirty(false);
+    setCreationError(null);
+  }, [isCreateDialogOpen]);
+
+  useEffect(() => {
+    if (!isCreateDialogOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsCreateDialogOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isCreateDialogOpen]);
+
   useEffect(() => {
     setSelectedMemberOptions((prev) =>
       prev.filter((option) => memberOptions.some((candidate) => candidate.value === option.value))
     );
   }, [memberOptions]);
-
-  useEffect(() => {
-    if (newConversationType === 'dm' && selectedMemberOptions.length > 1) {
-      setSelectedMemberOptions((prev) => (prev.length ? [prev[0]!] : prev));
-    }
-  }, [newConversationType, selectedMemberOptions.length]);
 
   const selectedConversation = useMemo(() => {
     if (!selectedConversationId) return null;
@@ -680,21 +834,24 @@ export default function App() {
     event.preventDefault();
 
     if (!accessToken) {
-      setError('Không tìm thấy token truy cập.');
+      setCreationError('Không tìm thấy token truy cập.');
       return;
     }
 
     const members = selectedMemberOptions.map((option) => option.value);
+    const type = createConversationType;
 
-    if (newConversationType === 'dm' && members.length !== 1) {
-      setError('Cuộc trò chuyện 1-1 cần chọn chính xác một thành viên.');
+    if (type === 'dm' && members.length !== 1) {
+      setCreationError('Cuộc trò chuyện 1-1 cần chọn chính xác một thành viên.');
       return;
     }
 
-    if (newConversationType === 'group' && members.length < 2) {
-      setError('Hãy chọn ít nhất hai thành viên cho nhóm.');
+    if (type === 'group' && members.length < 2) {
+      setCreationError('Hãy chọn ít nhất hai thành viên cho nhóm.');
       return;
     }
+
+    setCreationError(null);
 
     try {
       const response = await fetch('http://localhost:4000/v1/conversations', {
@@ -704,9 +861,12 @@ export default function App() {
           authorization: `Bearer ${accessToken}`
         },
         body: JSON.stringify({
-          type: newConversationType,
+          type,
           members,
-          name: newConversationType === 'group' ? newConversationName || undefined : undefined
+          name:
+            type === 'group'
+              ? newConversationName.trim() || conversationPreviewName || undefined
+              : undefined
         })
       });
 
@@ -724,12 +884,12 @@ export default function App() {
       };
       setConversations((prev) => sortConversations([enriched, ...prev.filter((item) => item.id !== enriched.id)]));
       setSelectedConversationId(enriched.id);
-      setSelectedMemberOptions([]);
-      setNewConversationName('');
-      setError(null);
+      setCreationError(null);
+      setIsCreateDialogOpen(false);
       setSidebarOpen(false);
     } catch (err) {
       console.error('Failed to create conversation', err);
+      setCreationError('Không thể tạo cuộc trò chuyện mới. Kiểm tra kết nối backend.');
       setError('Không thể tạo cuộc trò chuyện mới. Kiểm tra kết nối backend.');
     }
   };
@@ -832,16 +992,28 @@ export default function App() {
     ? `${selectedConversation.type === 'group' ? 'Nhóm' : '1 vs 1'} · ${selectedConversation.members.length} thành viên`
     : 'Chọn một cuộc trò chuyện hoặc tạo mới';
 
-  const memberSelectValue: SingleValue<UserOption> | MultiValue<UserOption> =
-    newConversationType === 'group' ? selectedMemberOptions : selectedMemberOptions[0] ?? null;
-
   const isAuthenticated = Boolean(sessionUser && accessToken);
+
+  const canSubmitConversation =
+    isAuthenticated &&
+    (createConversationType === 'group'
+      ? selectedMemberOptions.length >= 2
+      : selectedMemberOptions.length === 1);
+
+  const createConversationLabel = createConversationType === 'group' ? 'Nhóm' : 'Trò chuyện 1-1';
+
+  const canSendMessage = Boolean(draft.trim() && selectedConversation && isAuthenticated);
 
   return (
     <div className="app">
       <div className="top-bar">
-        <button type="button" className="sidebar-toggle" onClick={toggleSidebar} aria-label="Toggle conversations">
-          ☰
+        <button
+          type="button"
+          className="sidebar-toggle"
+          onClick={toggleSidebar}
+          aria-label="Mở danh sách cuộc trò chuyện"
+        >
+          <Menu size={20} aria-hidden />
         </button>
         <div className="top-meta">
           <h1>VIChat</h1>
@@ -849,7 +1021,7 @@ export default function App() {
         </div>
         <div className="user-pill">
           <span className="avatar" aria-hidden>
-            🛡️
+            <ShieldCheck size={20} />
           </span>
           <span className="user-details">
             <strong>{sessionUser?.displayName ?? 'Chưa đăng nhập'}</strong>
@@ -857,7 +1029,8 @@ export default function App() {
           </span>
           {isAuthenticated && (
             <button type="button" className="logout-button" onClick={handleLogout}>
-              Đăng xuất
+              <LogOut size={16} aria-hidden />
+              <span>Đăng xuất</span>
             </button>
           )}
         </div>
@@ -899,90 +1072,20 @@ export default function App() {
             {!conversations.length && <li className="conversation-empty">Chưa có cuộc trò chuyện nào.</li>}
           </ul>
 
-          <form className="conversation-form" onSubmit={handleCreateConversation}>
-            <h3>Tạo cuộc trò chuyện</h3>
-            <label>
-              Loại
-              <Select
-                classNamePrefix="rs"
-                options={[
-                  { value: 'dm', label: '1 vs 1' },
-                  { value: 'group', label: 'Nhóm' }
-                ]}
-                isSearchable={false}
-                value={
-                  newConversationType === 'dm'
-                    ? { value: 'dm', label: '1 vs 1' }
-                    : { value: 'group', label: 'Nhóm' }
-                }
-                onChange={(option) => {
-                  const next = (option as SingleValue<{ value: 'dm' | 'group'; label: string }>)?.value ?? 'dm';
-                  setNewConversationType(next);
-                }}
-              />
-            </label>
-            {newConversationType === 'group' && (
-              <label>
-                Tên nhóm
-                <input
-                  type="text"
-                  value={newConversationName}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    setNewConversationName(event.target.value)
-                  }
-                  placeholder="Tên hiển thị"
-                />
-              </label>
-            )}
-            <label>
-              Thành viên
-              <Select<UserOption>
-                classNamePrefix="rs"
-                options={memberOptions}
-                isMulti={newConversationType === 'group'}
-                value={memberSelectValue}
-                onChange={(value) => {
-                  const normalized = Array.isArray(value)
-                    ? (value as MultiValue<UserOption>)
-                    : value
-                    ? [value as UserOption]
-                    : [];
-                  setSelectedMemberOptions(normalized);
-                }}
-                placeholder="Chọn thành viên"
-                formatOptionLabel={(option: UserOption) => (
-                  <div className="user-option">
-                    <div className="user-option__main">
-                      <span className="user-option__name">{option.label}</span>
-                      <span className="user-option__id">{option.value}</span>
-                    </div>
-                    <div className="user-option__meta">
-                      {option.roles.map((role) => (
-                        <span key={role} className="chip chip--role">
-                          {role}
-                        </span>
-                      ))}
-                      <span className={`chip chip--status chip--status-${option.status}`}>
-                        {option.status === 'active' ? 'Hoạt động' : 'Đã khóa'}
-                      </span>
-                    </div>
-                  </div>
-                )}
-                isDisabled={!memberOptions.length}
-              />
-              <datalist id="tenant-users">
-                {tenantUsers.map((user) => (
-                  <option key={user.userId} value={user.userId}>
-                    {user.displayName}
-                  </option>
-                ))}
-              </datalist>
-              <small className="field-hint">Chọn từ danh sách người dùng của tenant để đảm bảo chính xác.</small>
-            </label>
-            <button type="submit" disabled={!isAuthenticated}>
-              Tạo mới
+          <div className="sidebar-actions">
+            <button
+              type="button"
+              className="new-conversation-button"
+              onClick={() => setIsCreateDialogOpen(true)}
+              disabled={!isAuthenticated}
+            >
+              <MessageCirclePlus size={18} aria-hidden />
+              <span>Tạo cuộc trò chuyện</span>
             </button>
-          </form>
+            {!isAuthenticated && (
+              <small className="sidebar-hint">Đăng nhập để bắt đầu cuộc trò chuyện mới.</small>
+            )}
+          </div>
         </aside>
         {sidebarOpen && (
           <button
@@ -1047,30 +1150,48 @@ export default function App() {
           <form className="composer" onSubmit={handleSubmit}>
             <div className="composer-meta">
               <span className="lock" aria-hidden>
-                🔐
+                <Lock size={16} />
               </span>
               <span>Được bảo vệ bằng Signal Double Ratchet. Nhập tin nhắn để gửi ngay lập tức.</span>
             </div>
             <div className="composer-inputs">
-              <textarea
+              <TextareaAutosize
+                className="composer-textarea"
                 placeholder="Nhập tin nhắn E2EE..."
                 value={draft}
                 onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setDraft(event.target.value)}
-                rows={2}
+                minRows={2}
+                maxRows={6}
                 disabled={!chat || !selectedConversation || !isAuthenticated}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    void sendMessage();
+                  }
+                }}
               />
               <div className="composer-actions">
                 <button
                   type="button"
-                  className={`sticker-button ${showStickers ? 'sticker-button--active' : ''}`}
+                  className={`composer-action sticker-button ${showStickers ? 'sticker-button--active' : ''}`}
                   onClick={() => setShowStickers((value) => !value)}
                   aria-label="Chèn nhãn dán"
                   disabled={!chat || !selectedConversation || !isAuthenticated}
                 >
-                  😊
+                  <Sparkles size={18} aria-hidden />
                 </button>
-                <button type="submit" disabled={!draft.trim() || !selectedConversation || !isAuthenticated}>
-                  Gửi
+                <button
+                  type="button"
+                  className="composer-action composer-action--clear"
+                  onClick={() => setDraft('')}
+                  disabled={!draft}
+                  aria-label="Xóa nội dung đang nhập"
+                >
+                  <Trash2 size={18} aria-hidden />
+                </button>
+                <button type="submit" className="composer-send" disabled={!canSendMessage}>
+                  <Send size={18} aria-hidden />
+                  <span>Gửi</span>
                 </button>
               </div>
             </div>
@@ -1094,6 +1215,120 @@ export default function App() {
         </main>
       </div>
 
+      {isCreateDialogOpen && (
+        <div
+          className="create-dialog"
+          role="dialog"
+          aria-modal="true"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsCreateDialogOpen(false);
+            }
+          }}
+        >
+          <form className="create-card" onSubmit={handleCreateConversation}>
+            <header className="create-card__header">
+              <div className="create-card__title">
+                <MessageCirclePlus size={20} aria-hidden />
+                <div>
+                  <h3>Cuộc trò chuyện mới</h3>
+                  <p>Chọn người nhận để bắt đầu kết nối.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="create-card__close"
+                onClick={() => setIsCreateDialogOpen(false)}
+                aria-label="Đóng tạo cuộc trò chuyện"
+              >
+                <X size={16} aria-hidden />
+              </button>
+            </header>
+
+            <div className="create-card__summary">
+              <span className="summary-pill">
+                <Users size={16} aria-hidden />
+                {selectedMemberOptions.length ? `${selectedMemberOptions.length} thành viên` : 'Chưa chọn'}
+              </span>
+              <span className={`summary-type summary-type--${createConversationType}`}>
+                {createConversationType === 'group' ? (
+                  <Users size={16} aria-hidden />
+                ) : (
+                  <User size={16} aria-hidden />
+                )}
+                {createConversationLabel}
+              </span>
+            </div>
+            <p className="create-card__hint">
+              Chọn một thành viên để chat riêng hoặc nhiều thành viên để tạo nhóm. Tên nhóm sẽ được gợi ý tự động.
+            </p>
+
+            <label className="create-card__field">
+              <span>Thành viên</span>
+              <Select<UserOption, true>
+                classNamePrefix="rs"
+                styles={sharedSelectStyles}
+                options={memberOptions}
+                value={selectedMemberOptions}
+                onChange={(value) => setSelectedMemberOptions(Array.isArray(value) ? value : [])}
+                placeholder="Tìm kiếm và chọn thành viên..."
+                isMulti
+                isSearchable
+                isClearable
+                closeMenuOnSelect={false}
+                noOptionsMessage={() => 'Không tìm thấy thành viên phù hợp'}
+                formatOptionLabel={(option: UserOption) => (
+                  <div className="user-option">
+                    <div className="user-option__main">
+                      <span className="user-option__name">{option.label}</span>
+                      <span className="user-option__id">{option.value}</span>
+                    </div>
+                    <div className="user-option__meta">
+                      {option.roles.map((role) => (
+                        <span key={role} className="chip chip--role">
+                          {role}
+                        </span>
+                      ))}
+                      <span className={`chip chip--status chip--status-${option.status}`}>
+                        {option.status === 'active' ? 'Hoạt động' : 'Đã khóa'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                isDisabled={!memberOptions.length}
+              />
+            </label>
+
+            {createConversationType === 'group' && (
+              <label className="create-card__field">
+                <span>Tên nhóm</span>
+                <input
+                  type="text"
+                  value={newConversationName}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
+                    const { value } = event.target;
+                    setIsGroupNameDirty(Boolean(value.trim().length));
+                    setNewConversationName(value);
+                  }}
+                  placeholder={conversationPreviewName || 'Tên nhóm'}
+                />
+              </label>
+            )}
+
+            {creationError && <p className="create-card__error">{creationError}</p>}
+
+            <div className="create-card__actions">
+              <button type="button" className="create-card__cancel" onClick={() => setIsCreateDialogOpen(false)}>
+                Hủy
+              </button>
+              <button type="submit" disabled={!canSubmitConversation}>
+                Bắt đầu trò chuyện
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {!isAuthenticated && (
         <div className="login-overlay" role="dialog" aria-modal="true">
           <form className="login-card" onSubmit={handleLogin}>
@@ -1102,6 +1337,7 @@ export default function App() {
               Người dùng
               <Select<UserOption>
                 classNamePrefix="rs"
+                styles={sharedSelectStyles as StylesConfig<UserOption, false>}
                 options={userOptions}
                 value={selectedLoginUser}
                 onChange={(option) => setSelectedLoginUser((option as SingleValue<UserOption>) ?? null)}
