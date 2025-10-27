@@ -22,6 +22,11 @@ export interface TenantUserProfile {
   lastLoginAt?: string | null;
 }
 
+export interface TenantUserDirectoryEntry {
+  userId: string;
+  displayName: string;
+}
+
 const COLLECTION_NAME = 'tenantUsers';
 
 interface SeedUserInput {
@@ -104,6 +109,23 @@ export async function listTenantUsers(db: Db, tenantId: string): Promise<TenantU
     roles: user.roles,
     status: user.status,
     lastLoginAt: user.lastLoginAt?.toISOString() ?? null
+  }));
+}
+
+export async function listPublicTenantUsers(
+  db: Db,
+  tenantId: string
+): Promise<TenantUserDirectoryEntry[]> {
+  const collection = db.collection<TenantUserRecord>(COLLECTION_NAME);
+  const users = await collection
+    .find({ tenantId, status: 'active' })
+    .project({ userId: 1, displayName: 1, _id: 0 })
+    .sort({ displayName: 1 })
+    .toArray();
+
+  return users.map((user) => ({
+    userId: user.userId,
+    displayName: user.displayName
   }));
 }
 

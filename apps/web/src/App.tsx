@@ -16,6 +16,11 @@ interface TenantUserProfile {
   lastLoginAt?: string | null;
 }
 
+interface TenantUserDirectoryEntry {
+  userId: string;
+  displayName: string;
+}
+
 interface UserOption {
   value: string;
   label: string;
@@ -361,9 +366,17 @@ export default function App() {
         if (!response.ok) {
           throw new Error('Unable to load tenant directory');
         }
-        const users = (await response.json()) as TenantUserProfile[];
+        const users = (await response.json()) as TenantUserDirectoryEntry[];
         if (!cancelled) {
-          setTenantUsers(users);
+          setTenantUsers(
+            users.map((user) => ({
+              userId: user.userId,
+              displayName: user.displayName,
+              roles: [],
+              status: 'active',
+              lastLoginAt: null
+            }))
+          );
         }
       } catch (err) {
         console.warn('Không thể tải danh sách người dùng tenant', err);
@@ -1007,9 +1020,7 @@ export default function App() {
               </div>
             )}
             {messages.map((message) => {
-              const isMine = Boolean(
-                sessionUser && (message.senderId === sessionUser.userId || message.senderDeviceId === deviceInfo.id)
-              );
+              const isMine = sessionUser?.userId === message.senderId;
               const ciphertext = message.body?.ciphertext ?? '';
               const isSticker = message.type === 'sticker' && message.sticker;
               const bubbleClass = `bubble ${isMine ? 'bubble--out' : 'bubble--in'}${isSticker ? ' bubble--sticker' : ''}`;
