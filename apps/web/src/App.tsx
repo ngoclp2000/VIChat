@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ChatKit from '@vichat/sdk';
 import type { ConversationDescriptor, MessagePayload } from '@vichat/shared';
 import './App.css';
@@ -26,8 +26,33 @@ export default function App() {
 
   const conversation = useMemo(createMockConversation, []);
 
+  const upsertMessage = useCallback((incoming?: MessagePayload | null) => {
+    if (!incoming || !incoming.id) return;
+
+    setMessages((prev) => {
+      const index = prev.findIndex((item) => item.id === incoming.id);
+      if (index >= 0) {
+        const next = [...prev];
+        next[index] = { ...prev[index], ...incoming };
+        return next;
+      }
+
+      return [...prev, incoming];
+    });
+  }, [setMessages]);
+
+  const handleError = useCallback(
+    (err: Error) => {
+      console.error('[VIChat] realtime error', err);
+      setError('Không thể duy trì kết nối realtime. Vui lòng kiểm tra backend.');
+      setStatus('disconnected');
+    },
+    [setError, setStatus]
+  );
+
   useEffect(() => {
     let isMounted = true;
+    let cleanupListener: (() => void) | undefined;
 
     async function fetchAccessToken() {
       const response = await fetch('http://localhost:4000/v1/auth/token', {
@@ -71,29 +96,43 @@ export default function App() {
           realtimeUrl: 'ws://localhost:4000/realtime'
         });
 
-        if (!isMounted) return;
+        if (!isMounted) {
+          return;
+        }
+
+        const messageListener = (message: MessagePayload) => {
+          upsertMessage(message);
+        };
 
         instance.on('state', setStatus);
-        instance.on('error', (err) => {
-          console.error('[VIChat] realtime error', err);
-          setError('Không thể duy trì kết nối realtime. Vui lòng kiểm tra backend.');
-          setStatus('disconnected');
-        });
-        instance.on('message', (message) => {
-          setMessages((prev) => [...prev, message]);
-        });
+        instance.on('error', handleError);
+        cleanupListener = () => {
+          instance.off('state', setStatus);
+          instance.off('error', handleError);
+        };
 
         const handle = await instance.conversationsOpen(conversation);
-        handle.on('message', (message) => {
-          setMessages((prev) => [...prev, message]);
-        });
+        handle.on('message', messageListener);
 
-        if (!isMounted) return;
+        if (!isMounted) {
+          handle.off('message', messageListener);
+          instance.off('state', setStatus);
+          instance.off('error', handleError);
+          return;
+        }
 
         setChat(instance);
+
+        cleanupListener = () => {
+          handle.off('message', messageListener);
+          instance.off('state', setStatus);
+          instance.off('error', handleError);
+        };
       } catch (err) {
         console.error('[VIChat] bootstrap failed', err);
         if (!isMounted) return;
+        cleanupListener?.();
+        cleanupListener = undefined;
         setStatus('disconnected');
         setError('Không thể lấy token demo từ backend. Hãy chắc chắn backend đang chạy ở cổng 4000.');
       }
@@ -103,8 +142,9 @@ export default function App() {
 
     return () => {
       isMounted = false;
+      cleanupListener?.();
     };
-  }, [conversation]);
+  }, [conversation, handleError, upsertMessage]);
 
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -113,7 +153,7 @@ export default function App() {
   const sendMessage = async () => {
     if (!chat || !draft.trim()) return;
     const message = await chat.sendText(conversation, draft);
-    setMessages((prev) => [...prev, message]);
+    upsertMessage(message);
     setDraft('');
   };
 
