@@ -1,11 +1,14 @@
 import Fastify from 'fastify';
+import { ZodError } from 'zod';
 import { getEnv } from './config/env';
 import { registerRealtimeGateway } from './modules/realtime/gateway';
 import { seedTenants } from './modules/tenants/store';
 import { registerConversationRoutes } from './modules/conversations/router';
-import { issueAccessToken, validateTokenRequest, verifyAccessToken } from './modules/auth/service';
+import { AuthError, issueAccessToken, validateTokenRequest, verifyAccessToken } from './modules/auth/service';
 import { connectMongo, closeMongo } from './config/mongo';
 import { registerClientRoutes } from './modules/clients/router';
+import { seedUsers } from './modules/users/store';
+import { registerUserRoutes } from './modules/users/router';
 
 export async function createApp() {
   const env = getEnv();
@@ -15,6 +18,7 @@ export async function createApp() {
 
   const mongo = await connectMongo();
   seedTenants();
+  await seedUsers(mongo.db);
 
   app.decorate('verifyJwt', (token: string) => verifyAccessToken(token));
   app.decorate('mongo', mongo);
@@ -87,16 +91,27 @@ export async function createApp() {
   app.post('/v1/auth/token', async (request, reply) => {
     try {
       const parsed = validateTokenRequest(request.body);
-      const token = issueAccessToken(parsed);
+      const token = await issueAccessToken(app.mongo.db, parsed);
       return reply.status(200).send(token);
     } catch (err) {
       request.log.error({ err }, 'Failed to issue token');
-      return reply.status(400).send({ message: 'Invalid token request' });
+      if (err instanceof ZodError) {
+        const firstIssue = err.issues[0];
+        const message = firstIssue?.message ?? 'Thiếu thông tin đăng nhập hợp lệ.';
+        return reply.status(400).send({ message });
+      }
+
+      if (err instanceof AuthError) {
+        return reply.status(err.statusCode).send({ message: err.message });
+      }
+
+      return reply.status(500).send({ message: 'Không thể xử lý yêu cầu đăng nhập.' });
     }
   });
 
   await registerConversationRoutes(app);
   await registerClientRoutes(app);
+  await registerUserRoutes(app);
 
   return app;
 }

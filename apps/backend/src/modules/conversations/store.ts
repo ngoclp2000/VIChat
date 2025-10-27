@@ -108,3 +108,15 @@ export function normalizeMembers(members: string[]): string[] {
   unique.sort();
   return unique;
 }
+
+export async function touchConversation(db: Db, tenantId: string, id: string, timestamp: Date): Promise<void> {
+  const collection = db.collection<ConversationRecord>('conversations');
+  await collection.updateOne(
+    { tenantId, _id: id },
+    {
+      $set: {
+        updatedAt: timestamp
+      }
+    }
+  );
+}

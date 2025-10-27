@@ -35,11 +35,11 @@ class MemoryStorage<T> implements OutboxStorage<T> {
   }
 }
 
-async function withStore<T>(mode: IDBTransactionMode, handler: (store: IDBObjectStore) => Promise<T>): Promise<T> {
+async function withStore<T>(mode: IDBTransactionMode, handler: (store: any) => Promise<T>): Promise<T> {
   const db = await openDb();
   const tx = db.transaction(STORE_NAME, mode);
   const store = tx.objectStore(STORE_NAME);
-  const result = await handler(store);
+  const result = await handler(store as any);
   await tx.done;
   return result;
 }
