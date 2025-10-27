@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { DeviceInfo } from '@vichat/shared';
 import { verifyAccessToken } from '../auth/service';
 import { createConversation, listConversationsForMember, toConversationResponse } from '../conversations/store';
+import { assertUsersBelongToTenant } from '../users/store';
 
 interface ClientDocument {
   _id: ObjectId;
@@ -53,7 +54,9 @@ export async function registerClientRoutes(app: FastifyInstance): Promise<void> 
     let clientDoc: ClientDocument;
 
     if (existing) {
-      const otherDevices = existing.devices.filter((device) => device.id !== deviceEntry.id);
+      const otherDevices = existing.devices.filter(
+        (device: ClientDocument['devices'][number]) => device.id !== deviceEntry.id
+      );
       clientDoc = {
         ...existing,
         displayName: payload.displayName ?? existing.displayName ?? verified.userId,
@@ -86,6 +89,7 @@ export async function registerClientRoutes(app: FastifyInstance): Promise<void> 
     if (payload.bootstrapConversations?.length) {
       for (const conversation of payload.bootstrapConversations) {
         try {
+          await assertUsersBelongToTenant(app.mongo.db, verified.tenantId, conversation.members);
           await createConversation(app.mongo.db, verified.tenantId, verified.userId, conversation);
         } catch (err) {
           request.log.warn({ err }, 'Failed to bootstrap conversation');
@@ -100,6 +104,7 @@ export async function registerClientRoutes(app: FastifyInstance): Promise<void> 
         id: verified.userId,
         tenantId: verified.tenantId,
         displayName: clientDoc.displayName,
+        roles: verified.roles,
         devices: clientDoc.devices.map((device) => ({
           id: device.id,
           platform: device.platform,
