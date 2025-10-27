@@ -142,7 +142,13 @@ export async function registerConversationRoutes(app: FastifyInstance): Promise<
       before: query.before ? new Date(query.before) : undefined
     };
 
-    const messages = await listMessagesForConversation(app.mongo.db, verified.tenantId, id, options);
+    const messages = await listMessagesForConversation(
+      app.mongo.db,
+      app.messageEncryptionKey,
+      verified.tenantId,
+      id,
+      options
+    );
     return reply.send(messages.map(toMessagePayload));
   });
 }

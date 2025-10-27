@@ -10,6 +10,7 @@ export interface Env {
   REALTIME_PUBLIC_URL: string;
   MONGODB_URI: string;
   MONGODB_DB: string;
+  MESSAGE_ENCRYPTION_KEY: string;
 }
 
 export function getEnv(): Env {
@@ -20,6 +21,8 @@ export function getEnv(): Env {
     JWT_SECRET: process.env.JWT_SECRET ?? 'local-dev-secret',
     REALTIME_PUBLIC_URL: process.env.REALTIME_PUBLIC_URL ?? 'ws://localhost:4000/realtime',
     MONGODB_URI: process.env.MONGODB_URI ?? 'mongodb://localhost:27017',
-    MONGODB_DB: process.env.MONGODB_DB ?? 'vichat'
+    MONGODB_DB: process.env.MONGODB_DB ?? 'vichat',
+    MESSAGE_ENCRYPTION_KEY:
+      process.env.MESSAGE_ENCRYPTION_KEY ?? 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
   };
 }

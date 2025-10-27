@@ -170,7 +170,7 @@ export function registerRealtimeGateway(app: FastifyInstance): void {
         throw new Error('User is not a member of this conversation');
       }
 
-      const messageRecord = await saveMessage(app.mongo.db, {
+      const messageRecord = await saveMessage(app.mongo.db, app.messageEncryptionKey, {
         id: parsed.id,
         tenantId: ctx.token.tenantId,
         conversationId: parsed.conversationId,

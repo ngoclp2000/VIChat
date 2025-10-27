@@ -1,5 +1,6 @@
 import type { Db } from 'mongodb';
 import type { CipherEnvelope, MessagePayload, StickerPayload } from '@vichat/shared';
+import { decryptMessagePayload, encryptMessagePayload, type EncryptedMessagePayload } from './crypto';
 
 export interface MessageRecord {
   _id: string;
@@ -12,6 +13,24 @@ export interface MessageRecord {
   readAt?: Date;
   type: MessagePayload['type'];
   body: CipherEnvelope;
+  metadata?: Record<string, unknown>;
+  sticker?: StickerPayload;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface MessageDocument {
+  _id: string;
+  tenantId: string;
+  conversationId: string;
+  senderId: string;
+  senderDeviceId: string;
+  sentAt: Date;
+  deliveredAt?: Date;
+  readAt?: Date;
+  type: MessagePayload['type'];
+  encryptedPayload?: EncryptedMessagePayload;
+  body?: CipherEnvelope;
   metadata?: Record<string, unknown>;
   sticker?: StickerPayload;
   createdAt: Date;
@@ -38,10 +57,19 @@ export interface ListMessagesOptions {
   before?: Date;
 }
 
-export async function saveMessage(db: Db, input: SaveMessageInput): Promise<MessageRecord> {
-  const collection = db.collection<MessageRecord>('messages');
+export async function saveMessage(db: Db, encryptionKey: Buffer, input: SaveMessageInput): Promise<MessageRecord> {
+  const collection = db.collection<MessageDocument>('messages');
   const now = new Date();
-  const record: MessageRecord = {
+  const encryptedPayload = encryptMessagePayload(
+    {
+      body: input.body,
+      metadata: input.metadata,
+      sticker: input.sticker
+    },
+    encryptionKey
+  );
+
+  const record: MessageDocument = {
     _id: input.id,
     tenantId: input.tenantId,
     conversationId: input.conversationId,
@@ -51,9 +79,7 @@ export async function saveMessage(db: Db, input: SaveMessageInput): Promise<Mess
     deliveredAt: input.deliveredAt,
     readAt: input.readAt,
     type: input.type,
-    body: input.body,
-    metadata: input.metadata,
-    sticker: input.sticker,
+    encryptedPayload,
     createdAt: now,
     updatedAt: now
   };
@@ -71,9 +97,7 @@ export async function saveMessage(db: Db, input: SaveMessageInput): Promise<Mess
         deliveredAt: record.deliveredAt,
         readAt: record.readAt,
         type: record.type,
-        body: record.body,
-        metadata: record.metadata,
-        sticker: record.sticker,
+        encryptedPayload: record.encryptedPayload,
         updatedAt: now
       }
     },
@@ -82,19 +106,20 @@ export async function saveMessage(db: Db, input: SaveMessageInput): Promise<Mess
 
   const persisted = await collection.findOne({ _id: record._id });
   if (!persisted) {
-    return record;
+    return toMessageRecord(record, encryptionKey);
   }
 
-  return { ...persisted };
+  return toMessageRecord(persisted, encryptionKey);
 }
 
 export async function listMessagesForConversation(
   db: Db,
+  encryptionKey: Buffer,
   tenantId: string,
   conversationId: string,
   options: ListMessagesOptions = {}
 ): Promise<MessageRecord[]> {
-  const collection = db.collection<MessageRecord>('messages');
+  const collection = db.collection<MessageDocument>('messages');
   const query: Record<string, unknown> = {
     tenantId,
     conversationId
@@ -112,7 +137,7 @@ export async function listMessagesForConversation(
     .limit(limit)
     .toArray();
 
-  return records.reverse().map((record): MessageRecord => ({ ...record }));
+  return records.reverse().map((record) => toMessageRecord(record, encryptionKey));
 }
 
 export function toMessagePayload(record: MessageRecord): MessagePayload {
@@ -128,5 +153,49 @@ export function toMessagePayload(record: MessageRecord): MessagePayload {
     body: record.body,
     metadata: record.metadata,
     sticker: record.sticker
+  };
+}
+
+function toMessageRecord(document: MessageDocument, encryptionKey: Buffer): MessageRecord {
+  if (document.encryptedPayload) {
+    const decrypted = decryptMessagePayload(document.encryptedPayload, encryptionKey);
+
+    return {
+      _id: document._id,
+      tenantId: document.tenantId,
+      conversationId: document.conversationId,
+      senderId: document.senderId,
+      senderDeviceId: document.senderDeviceId,
+      sentAt: document.sentAt,
+      deliveredAt: document.deliveredAt,
+      readAt: document.readAt,
+      type: document.type,
+      body: decrypted.body,
+      metadata: decrypted.metadata,
+      sticker: decrypted.sticker,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt
+    };
+  }
+
+  if (!document.body) {
+    throw new Error('Message document missing encrypted payload and legacy body');
+  }
+
+  return {
+    _id: document._id,
+    tenantId: document.tenantId,
+    conversationId: document.conversationId,
+    senderId: document.senderId,
+    senderDeviceId: document.senderDeviceId,
+    sentAt: document.sentAt,
+    deliveredAt: document.deliveredAt,
+    readAt: document.readAt,
+    type: document.type,
+    body: document.body,
+    metadata: document.metadata,
+    sticker: document.sticker,
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt
   };
 }
