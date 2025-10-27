@@ -20,38 +20,90 @@ export default function App() {
   const [status, setStatus] = useState('disconnected');
   const [draft, setDraft] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
 
   const conversation = useMemo(createMockConversation, []);
 
   useEffect(() => {
-    async function bootstrap() {
-      const instance = await ChatKit.init({
-        tenantId: 'tenant-demo',
-        clientId: 'demo-app',
-        token: 'demo-token',
-        device: {
-          id: currentDeviceId,
-          platform: 'web'
+    let isMounted = true;
+
+    async function fetchAccessToken() {
+      const response = await fetch('http://localhost:4000/v1/auth/token', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
         },
-        realtimeUrl: 'ws://localhost:4000/realtime'
+        body: JSON.stringify({
+          clientId: 'demo-app',
+          tenantId: 'tenant-demo',
+          userId: 'user:demo',
+          scopes: ['messages:write', 'presence:write']
+        })
       });
 
-      instance.on('state', setStatus);
-      instance.on('message', (message) => {
-        setMessages((prev) => [...prev, message]);
-      });
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || 'Unable to obtain access token');
+      }
 
-      const handle = await instance.conversationsOpen(conversation);
-      handle.on('message', (message) => {
-        setMessages((prev) => [...prev, message]);
-      });
+      const payload = (await response.json()) as { accessToken: string };
+      return payload.accessToken;
+    }
 
-      setChat(instance);
+    async function bootstrap() {
+      setStatus('connecting');
+      setError(null);
+
+      try {
+        const token = await fetchAccessToken();
+        if (!isMounted) return;
+
+        const instance = await ChatKit.init({
+          tenantId: 'tenant-demo',
+          clientId: 'demo-app',
+          token,
+          device: {
+            id: currentDeviceId,
+            platform: 'web'
+          },
+          realtimeUrl: 'ws://localhost:4000/realtime'
+        });
+
+        if (!isMounted) return;
+
+        instance.on('state', setStatus);
+        instance.on('error', (err) => {
+          console.error('[VIChat] realtime error', err);
+          setError('Không thể duy trì kết nối realtime. Vui lòng kiểm tra backend.');
+          setStatus('disconnected');
+        });
+        instance.on('message', (message) => {
+          setMessages((prev) => [...prev, message]);
+        });
+
+        const handle = await instance.conversationsOpen(conversation);
+        handle.on('message', (message) => {
+          setMessages((prev) => [...prev, message]);
+        });
+
+        if (!isMounted) return;
+
+        setChat(instance);
+      } catch (err) {
+        console.error('[VIChat] bootstrap failed', err);
+        if (!isMounted) return;
+        setStatus('disconnected');
+        setError('Không thể lấy token demo từ backend. Hãy chắc chắn backend đang chạy ở cổng 4000.');
+      }
     }
 
     void bootstrap();
+
+    return () => {
+      isMounted = false;
+    };
   }, [conversation]);
 
   useEffect(() => {
@@ -159,6 +211,7 @@ export default function App() {
           </header>
 
           <section className="message-list" aria-live="polite">
+            {error && <div className="connection-error">{error}</div>}
             {messages.length === 0 && (
               <div className="empty-state">
                 <h3>Hãy bắt đầu cuộc trò chuyện bảo mật</h3>

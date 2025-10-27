@@ -48,7 +48,7 @@ Backend cung cấp:
 npm run dev --workspace apps/web
 ```
 
-Ứng dụng React demo khởi tạo SDK, mở hội thoại mẫu và hiển thị luồng tin nhắn realtime. Các thông số kết nối (tenant, token) được cấu hình tạm thời cho môi trường local.
+Ứng dụng React demo khởi tạo SDK, mở hội thoại mẫu và hiển thị luồng tin nhắn realtime. Khi khởi chạy ở môi trường local, frontend sẽ tự gọi `POST /v1/auth/token` để xin JWT demo trước khi mở WebSocket, vì vậy hãy đảm bảo backend được start trước.
 
 ## SDK Web
 
