@@ -168,6 +168,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationView[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [activeConversation, setActiveConversation] = useState<ConversationDescriptor | null>(null);
   const [selectedMemberOptions, setSelectedMemberOptions] = useState<UserOption[]>([]);
   const [newConversationType, setNewConversationType] = useState<'dm' | 'group'>('dm');
   const [newConversationName, setNewConversationName] = useState('');
@@ -288,6 +289,20 @@ export default function App() {
     if (!selectedConversationId) return null;
     return conversations.find((item) => item.id === selectedConversationId) ?? null;
   }, [conversations, selectedConversationId]);
+
+  useEffect(() => {
+    setActiveConversation((prev) => {
+      if (!selectedConversation) {
+        return null;
+      }
+
+      if (prev?.id === selectedConversation.id) {
+        return prev;
+      }
+
+      return selectedConversation;
+    });
+  }, [selectedConversation, selectedConversation?.id]);
 
   const upsertMessage = useCallback((incoming?: MessagePayload | null) => {
     if (!incoming || !incoming.id) return;
@@ -548,7 +563,7 @@ export default function App() {
   useEffect(() => {
     setShowStickers(false);
 
-    if (!chat || !selectedConversation) {
+    if (!chat || !activeConversation) {
       setMessages([]);
       return;
     }
@@ -563,7 +578,7 @@ export default function App() {
       try {
         if (accessToken) {
           const historyResponse = await fetch(
-            `http://localhost:4000/v1/conversations/${selectedConversation.id}/messages?limit=50`,
+            `http://localhost:4000/v1/conversations/${activeConversation.id}/messages?limit=50`,
             {
               headers: {
                 authorization: `Bearer ${accessToken}`
@@ -594,9 +609,9 @@ export default function App() {
 
       if (cancelled) return;
 
-      const handle = await chat.conversationsOpen(selectedConversation);
+      const handle = await chat.conversationsOpen(activeConversation);
       const messageListener = (message: MessagePayload) => {
-        if (message.conversationId === selectedConversation.id) {
+        if (message.conversationId === activeConversation.id) {
           upsertMessage(message);
         }
       };
@@ -614,7 +629,7 @@ export default function App() {
         detach();
       }
     };
-  }, [accessToken, chat, selectedConversation, upsertMessage, applyMessageToConversation]);
+  }, [accessToken, chat, activeConversation, upsertMessage, applyMessageToConversation]);
 
   const sendMessage = useCallback(async () => {
     if (!chat || !draft.trim() || !selectedConversation || !sessionUser) return;
