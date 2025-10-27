@@ -29,7 +29,10 @@ interface MessageDocument {
   deliveredAt?: Date;
   readAt?: Date;
   type: MessagePayload['type'];
-  encryptedPayload: EncryptedMessagePayload;
+  encryptedPayload?: EncryptedMessagePayload;
+  body?: CipherEnvelope;
+  metadata?: Record<string, unknown>;
+  sticker?: StickerPayload;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -154,7 +157,30 @@ export function toMessagePayload(record: MessageRecord): MessagePayload {
 }
 
 function toMessageRecord(document: MessageDocument, encryptionKey: Buffer): MessageRecord {
-  const decrypted = decryptMessagePayload(document.encryptedPayload, encryptionKey);
+  if (document.encryptedPayload) {
+    const decrypted = decryptMessagePayload(document.encryptedPayload, encryptionKey);
+
+    return {
+      _id: document._id,
+      tenantId: document.tenantId,
+      conversationId: document.conversationId,
+      senderId: document.senderId,
+      senderDeviceId: document.senderDeviceId,
+      sentAt: document.sentAt,
+      deliveredAt: document.deliveredAt,
+      readAt: document.readAt,
+      type: document.type,
+      body: decrypted.body,
+      metadata: decrypted.metadata,
+      sticker: decrypted.sticker,
+      createdAt: document.createdAt,
+      updatedAt: document.updatedAt
+    };
+  }
+
+  if (!document.body) {
+    throw new Error('Message document missing encrypted payload and legacy body');
+  }
 
   return {
     _id: document._id,
@@ -166,9 +192,9 @@ function toMessageRecord(document: MessageDocument, encryptionKey: Buffer): Mess
     deliveredAt: document.deliveredAt,
     readAt: document.readAt,
     type: document.type,
-    body: decrypted.body,
-    metadata: decrypted.metadata,
-    sticker: decrypted.sticker,
+    body: document.body,
+    metadata: document.metadata,
+    sticker: document.sticker,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt
   };
