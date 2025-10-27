@@ -1,4 +1,6 @@
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import websocket from '@fastify/websocket';
 import rateLimit from 'fastify-rate-limit';
 import { getEnv } from './config/env';
 import { registerRealtimeGateway } from './modules/realtime/gateway';
@@ -16,30 +18,13 @@ export async function createApp() {
 
   app.decorate('verifyJwt', (token: string) => verifyAccessToken(token));
 
-  app.addHook('onRequest', (request, reply, done) => {
-    const origin = request.headers.origin ?? '*';
-    reply.header('Access-Control-Allow-Origin', origin);
-    reply.header('Vary', 'Origin');
-    reply.header('Access-Control-Allow-Credentials', 'true');
-    reply.header(
-      'Access-Control-Allow-Headers',
-      (request.headers['access-control-request-headers'] as string | undefined) ?? 'authorization,content-type'
-    );
-    reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-
-    if (request.method === 'OPTIONS') {
-      reply.status(204).send();
-      return;
-    }
-
-    done();
-  });
-
+  await app.register(cors, { origin: true, credentials: true });
   await app.register(rateLimit, {
     max: 1000,
     timeWindow: '1 minute',
     keyGenerator: (request) => request.headers['x-tenant-id']?.toString() ?? request.ip
   });
+  await app.register(websocket);
 
   registerRealtimeGateway(app);
 
