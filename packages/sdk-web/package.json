@@ -1,0 +1,27 @@
+{
+  "name": "@vichat/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@vichat/shared": "file:../shared",
+    "eventemitter3": "^5.0.1",
+    "idb": "^7.1.1"
+  },
+  "devDependencies": {
+    "vitest": "^1.3.1"
+  }
+}
