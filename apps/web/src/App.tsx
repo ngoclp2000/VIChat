@@ -203,29 +203,28 @@ export default function App() {
     });
   }, []);
 
-  const resetSession = useCallback(
-    (keepAuthError = false) => {
-      chat?.disconnect();
-      setChat(null);
-      setAccessToken('');
-      setSessionUser(null);
-      setSelectedConversationId(null);
-      setConversations([]);
-      setMessages([]);
-      setDraft('');
-      setSelectedMemberOptions([]);
-      setNewConversationName('');
-      setStatus('disconnected');
-      setSelectedLoginUser(null);
-      setLoginSecret('');
-      setError(null);
-      if (!keepAuthError) {
-        setAuthError(null);
-      }
-      writeStoredSession(null);
-    },
-    [chat]
-  );
+  const resetSession = useCallback((keepAuthError = false) => {
+    setChat((prev) => {
+      prev?.disconnect();
+      return null;
+    });
+    setAccessToken('');
+    setSessionUser(null);
+    setSelectedConversationId(null);
+    setConversations([]);
+    setMessages([]);
+    setDraft('');
+    setSelectedMemberOptions([]);
+    setNewConversationName('');
+    setStatus('disconnected');
+    setSelectedLoginUser(null);
+    setLoginSecret('');
+    setError(null);
+    if (!keepAuthError) {
+      setAuthError(null);
+    }
+    writeStoredSession(null);
+  }, []);
 
   const handleLogout = useCallback(() => {
     resetSession(false);
