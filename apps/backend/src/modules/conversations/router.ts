@@ -7,6 +7,8 @@ import {
   listConversationsForMember,
   toConversationResponse
 } from './store';
+import { assertUsersBelongToTenant } from '../users/store';
+import { listMessagesForConversation, toMessagePayload } from '../messages/store';
 
 const createConversationSchema = z.object({
   type: z.enum(['dm', 'group']),
@@ -20,6 +22,18 @@ const createConversationSchema = z.object({
     .optional()
 });
 
+const listMessagesQuerySchema = z.object({
+  limit: z
+    .union([z.string(), z.number()])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : Number(value)))
+    .refine((value) => value === undefined || !Number.isNaN(value as number), {
+      message: 'limit must be numeric'
+    })
+    .transform((value) => (value === undefined ? undefined : Math.floor(value as number))),
+  before: z.string().datetime().optional()
+});
+
 export async function registerConversationRoutes(app: FastifyInstance): Promise<void> {
   app.post('/v1/conversations', async (request, reply) => {
     const authHeader = request.headers.authorization;
@@ -31,6 +45,13 @@ export async function registerConversationRoutes(app: FastifyInstance): Promise<
     const verified = verifyAccessToken(token);
 
     const payload = createConversationSchema.parse(request.body);
+
+    try {
+      await assertUsersBelongToTenant(app.mongo.db, verified.tenantId, payload.members);
+    } catch (err) {
+      request.log.warn({ err }, 'Invalid members for conversation');
+      return reply.status(400).send({ message: (err as Error).message });
+    }
 
     try {
       const { record, created } = await createConversation(app.mongo.db, verified.tenantId, verified.userId, {
@@ -94,5 +115,34 @@ export async function registerConversationRoutes(app: FastifyInstance): Promise<
     }
 
     return reply.send(toConversationResponse(record));
+  });
+
+  app.get('/v1/conversations/:id/messages', async (request, reply) => {
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return reply.status(401).send({ message: 'Missing token' });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const verified = verifyAccessToken(token);
+    const { id } = request.params as { id: string };
+    const query = listMessagesQuerySchema.parse(request.query);
+    const conversation = await getConversationById(app.mongo.db, verified.tenantId, id);
+
+    if (!conversation) {
+      return reply.status(404).send({ message: 'Conversation not found' });
+    }
+
+    if (!conversation.members.includes(verified.userId)) {
+      return reply.status(403).send({ message: 'Forbidden' });
+    }
+
+    const options = {
+      limit: query.limit,
+      before: query.before ? new Date(query.before) : undefined
+    };
+
+    const messages = await listMessagesForConversation(app.mongo.db, verified.tenantId, id, options);
+    return reply.send(messages.map(toMessagePayload));
   });
 }

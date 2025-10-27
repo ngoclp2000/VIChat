@@ -1,11 +1,12 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ChatKit from '@vichat/sdk';
-import type { ConversationDescriptor, MessagePayload } from '@vichat/shared';
+import type { ConversationDescriptor, MessagePayload, StickerPayload } from '@vichat/shared';
 import './App.css';
 
 const tenantId = 'tenant-demo';
 const clientId = 'demo-app';
 const userId = 'user:demo';
+const userSecret = 'demo-password';
 const deviceInfo = { id: 'web-demo-device', platform: 'web' as const };
 
 const bootstrapConversations = [
@@ -13,6 +14,29 @@ const bootstrapConversations = [
     type: 'dm' as const,
     members: ['user:support'],
     name: 'Đội hỗ trợ'
+  }
+];
+
+const stickerCatalog: StickerPayload[] = [
+  {
+    id: 'sticker:thumbs_up',
+    name: 'Tuyệt vời',
+    url: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f44d.png'
+  },
+  {
+    id: 'sticker:rocket',
+    name: 'Tăng tốc',
+    url: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f680.png'
+  },
+  {
+    id: 'sticker:party',
+    name: 'Ăn mừng',
+    url: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f389.png'
+  },
+  {
+    id: 'sticker:coffee',
+    name: 'Cà phê',
+    url: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/2615.png'
   }
 ];
 
@@ -41,6 +65,11 @@ export default function App() {
   const [newConversationMembers, setNewConversationMembers] = useState('');
   const [newConversationType, setNewConversationType] = useState<'dm' | 'group'>('dm');
   const [newConversationName, setNewConversationName] = useState('');
+  const [tenantUsers, setTenantUsers] = useState<
+    Array<{ userId: string; displayName: string; roles: string[]; lastLoginAt?: string | null }>
+  >([]);
+  const [showStickers, setShowStickers] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -84,6 +113,7 @@ export default function App() {
           clientId,
           tenantId,
           userId,
+          userSecret,
           scopes: ['messages:write', 'presence:write']
         })
       });
@@ -157,6 +187,28 @@ export default function App() {
         });
         setConversations(sorted);
         setSelectedConversationId((prev) => prev ?? sorted[0]?.id ?? null);
+
+        try {
+          const usersResponse = await fetch(`http://localhost:4000/v1/tenants/${tenantId}/users`, {
+            headers: {
+              authorization: `Bearer ${token}`
+            }
+          });
+
+          if (usersResponse.ok) {
+            const users = (await usersResponse.json()) as Array<{
+              userId: string;
+              displayName: string;
+              roles: string[];
+              lastLoginAt?: string | null;
+            }>;
+            if (isMounted) {
+              setTenantUsers(users);
+            }
+          }
+        } catch (err) {
+          console.warn('Không thể tải danh sách người dùng tenant', err);
+        }
       } catch (err) {
         console.error('[VIChat] bootstrap failed', err);
         if (!isMounted) return;
@@ -180,12 +232,15 @@ export default function App() {
   }, [messages]);
 
   useEffect(() => {
+    setShowStickers(false);
+
     if (!chat || !selectedConversation) {
       setMessages([]);
       return;
     }
 
     let detach: (() => void) | undefined;
+    let cancelled = false;
 
     const messageListener = (message: MessagePayload) => {
       if (message.conversationId === selectedConversation.id) {
@@ -195,6 +250,38 @@ export default function App() {
 
     const attach = async () => {
       setMessages([]);
+      setIsLoadingMessages(true);
+
+      try {
+        if (accessToken) {
+          const historyResponse = await fetch(
+            `http://localhost:4000/v1/conversations/${selectedConversation.id}/messages?limit=50`,
+            {
+              headers: {
+                authorization: `Bearer ${accessToken}`
+              }
+            }
+          );
+
+          if (historyResponse.ok) {
+            const history = (await historyResponse.json()) as MessagePayload[];
+            if (!cancelled) {
+              setMessages(history);
+            }
+          } else {
+            console.warn('Không thể tải lịch sử tin nhắn');
+          }
+        }
+      } catch (err) {
+        console.warn('Lỗi tải lịch sử tin nhắn', err);
+      } finally {
+        if (!cancelled) {
+          setIsLoadingMessages(false);
+        }
+      }
+
+      if (cancelled) return;
+
       const handle = await chat.conversationsOpen(selectedConversation);
       handle.on('message', messageListener);
       detach = () => {
@@ -205,23 +292,35 @@ export default function App() {
     void attach();
 
     return () => {
+      cancelled = true;
       if (detach) {
         detach();
       }
     };
-  }, [chat, selectedConversation, upsertMessage]);
+  }, [accessToken, chat, selectedConversation, upsertMessage]);
 
   const sendMessage = useCallback(async () => {
     if (!chat || !draft.trim() || !selectedConversation) return;
     const message = await chat.sendText(selectedConversation, draft);
     upsertMessage(message);
     setDraft('');
+    setShowStickers(false);
   }, [chat, draft, selectedConversation, upsertMessage]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     void sendMessage();
   };
+
+  const handleSendSticker = useCallback(
+    async (sticker: StickerPayload) => {
+      if (!chat || !selectedConversation) return;
+      const message = await chat.sendSticker(selectedConversation, sticker);
+      upsertMessage(message);
+      setShowStickers(false);
+    },
+    [chat, selectedConversation, upsertMessage]
+  );
 
   const toggleSidebar = () => setSidebarOpen((value) => !value);
 
@@ -367,8 +466,17 @@ export default function App() {
                 type="text"
                 value={newConversationMembers}
                 onChange={(event) => setNewConversationMembers(event.target.value)}
+                list="tenant-users"
                 placeholder="ví dụ: user:alice, user:bob"
               />
+              <datalist id="tenant-users">
+                {tenantUsers.map((user) => (
+                  <option key={user.userId} value={user.userId}>
+                    {user.displayName}
+                  </option>
+                ))}
+              </datalist>
+              <small className="field-hint">Chọn từ danh sách người dùng của tenant để đảm bảo chính xác.</small>
             </label>
             <button type="submit">Tạo mới</button>
           </form>
@@ -401,22 +509,32 @@ export default function App() {
 
           <section className="message-list" aria-live="polite">
             {error && <div className="connection-error">{error}</div>}
-            {!messages.length && !error && (
+            {isLoadingMessages && !error && <div className="message-loading">Đang tải tin nhắn...</div>}
+            {!messages.length && !error && !isLoadingMessages && (
               <div className="empty-state">
                 <h3>Chưa có tin nhắn</h3>
                 <p>Tạo tin nhắn đầu tiên của bạn trong cuộc trò chuyện này.</p>
               </div>
             )}
             {messages.map((message) => {
-              const isMine = message.senderId === deviceInfo.id || message.senderDeviceId === deviceInfo.id;
+              const isMine = message.senderId === userId || message.senderDeviceId === deviceInfo.id;
               const ciphertext = message.body?.ciphertext ?? '';
+              const isSticker = message.type === 'sticker' && message.sticker;
+              const bubbleClass = `bubble ${isMine ? 'bubble--out' : 'bubble--in'}${isSticker ? ' bubble--sticker' : ''}`;
               return (
-                <article key={message.id} className={`bubble ${isMine ? 'bubble--out' : 'bubble--in'}`}>
+                <article key={message.id} className={bubbleClass}>
                   <header>
                     <span className="bubble-author">{isMine ? 'Bạn' : message.senderId}</span>
                     <time>{formatTime(message.sentAt)}</time>
                   </header>
-                  <p>{ciphertext || 'Tin nhắn trống'}</p>
+                  {isSticker && message.sticker ? (
+                    <div className="sticker-message">
+                      <img src={message.sticker.url} alt={message.sticker.name ?? message.sticker.id} />
+                      {message.sticker.name && <span>{message.sticker.name}</span>}
+                    </div>
+                  ) : (
+                    <p>{ciphertext || 'Tin nhắn trống'}</p>
+                  )}
                 </article>
               );
             })}
@@ -438,10 +556,36 @@ export default function App() {
                 rows={2}
                 disabled={!chat || !selectedConversation}
               />
-              <button type="submit" disabled={!draft.trim() || !selectedConversation}>
-                Gửi
-              </button>
+              <div className="composer-actions">
+                <button
+                  type="button"
+                  className={`sticker-button ${showStickers ? 'sticker-button--active' : ''}`}
+                  onClick={() => setShowStickers((value) => !value)}
+                  aria-label="Chèn nhãn dán"
+                  disabled={!chat || !selectedConversation}
+                >
+                  😊
+                </button>
+                <button type="submit" disabled={!draft.trim() || !selectedConversation}>
+                  Gửi
+                </button>
+              </div>
             </div>
+            {showStickers && (
+              <div className="sticker-panel" role="menu">
+                {stickerCatalog.map((sticker) => (
+                  <button
+                    type="button"
+                    key={sticker.id}
+                    className="sticker-option"
+                    onClick={() => handleSendSticker(sticker)}
+                  >
+                    <img src={sticker.url} alt={sticker.name ?? sticker.id} />
+                    <span>{sticker.name ?? sticker.id}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </form>
         </main>
       </div>
