@@ -525,12 +525,14 @@ export default function App() {
 
         setSuperAdminToken(result.token);
         setSuperAdminError(null);
+        setIsSuperAdminOpen(true);
         await fetchSuperAdminTenants(result.token);
       } catch (err) {
         console.error('Không thể đăng nhập superadmin', err);
         setSuperAdminToken('');
         setSuperAdminTenants([]);
         setSuperAdminError((err as Error).message || 'Không thể đăng nhập superadmin.');
+        setIsSuperAdminOpen(false);
       } finally {
         setIsAuthenticatingSuperAdmin(false);
       }
@@ -2008,7 +2010,7 @@ export default function App() {
         </div>
       )}
 
-      {!isAuthenticated && (
+      {!isAuthenticated && !isSuperAdminOpen && (
         <div className="login-overlay" role="dialog" aria-modal="true">
           <div className="login-dialog">
             <div className="login-card">
