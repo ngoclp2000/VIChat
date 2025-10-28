@@ -49,39 +49,26 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
   app.post('/v1/tenants/:tenantId/users', async (request, reply) => {
     const { tenantId } = request.params as { tenantId: string };
     const authHeader = request.headers.authorization;
-    let authorized = false;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return reply.status(401).send({ message: 'Missing admin credentials' });
+    }
+
     let canAssignRoles = false;
+    try {
+      const token = authHeader.replace('Bearer ', '');
+      const verified = verifyAccessToken(token);
 
-    if (authHeader?.startsWith('Bearer ')) {
-      try {
-        const token = authHeader.replace('Bearer ', '');
-        const verified = verifyAccessToken(token);
-
-        if (tenantId !== verified.tenantId) {
-          return reply.status(403).send({ message: 'Forbidden' });
-        }
-
-        authorized = true;
-        canAssignRoles = true;
-      } catch {
-        return reply.status(401).send({ message: 'Invalid token' });
-      }
-    } else {
-      const { clientId } = request.query as { clientId?: string };
-      if (!clientId) {
-        return reply.status(401).send({ message: 'Missing credentials' });
-      }
-
-      const tenant = getTenantByClientId(clientId);
-      if (!tenant || tenant.id !== tenantId) {
+      if (tenantId !== verified.tenantId) {
         return reply.status(403).send({ message: 'Forbidden' });
       }
 
-      authorized = true;
-    }
+      if (!verified.roles.includes('admin')) {
+        return reply.status(403).send({ message: 'Chỉ quản trị viên mới được phép tạo người dùng mới.' });
+      }
 
-    if (!authorized) {
-      return reply.status(401).send({ message: 'Unauthorized' });
+      canAssignRoles = true;
+    } catch {
+      return reply.status(401).send({ message: 'Invalid token' });
     }
 
     let parsed: z.infer<typeof createUserSchema>;

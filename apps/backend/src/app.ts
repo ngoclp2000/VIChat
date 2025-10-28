@@ -9,6 +9,7 @@ import { connectMongo, closeMongo } from './config/mongo';
 import { registerClientRoutes } from './modules/clients/router';
 import { seedUsers } from './modules/users/store';
 import { registerUserRoutes } from './modules/users/router';
+import { registerSuperAdminRoutes } from './modules/superadmin/router';
 
 export async function createApp() {
   const env = getEnv();
@@ -117,6 +118,7 @@ export async function createApp() {
   await registerConversationRoutes(app);
   await registerClientRoutes(app);
   await registerUserRoutes(app);
+  await registerSuperAdminRoutes(app);
 
   return app;
 }
