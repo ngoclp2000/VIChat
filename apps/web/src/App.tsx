@@ -36,6 +36,18 @@ interface TenantUserDirectoryEntry {
   displayName: string;
 }
 
+interface TenantSummary {
+  id: string;
+  name: string;
+  clientId: string;
+  apiKey: string;
+  plan: 'free' | 'pro' | 'enterprise';
+  limits: {
+    messagesPerMinute: number;
+    callsPerMinute: number;
+  };
+}
+
 interface UserOption {
   value: string;
   label: string;
@@ -218,6 +230,7 @@ export default function App() {
   const [showStickers, setShowStickers] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [loginMode, setLoginMode] = useState<'tenant' | 'superadmin'>('tenant');
   const [loginSecret, setLoginSecret] = useState('');
   const [selectedLoginUser, setSelectedLoginUser] = useState<UserOption | null>(null);
   const [sessionUser, setSessionUser] = useState<{ userId: string; displayName: string; roles: string[] } | null>(null);
@@ -226,13 +239,38 @@ export default function App() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [creationError, setCreationError] = useState<string | null>(null);
   const [isGroupNameDirty, setIsGroupNameDirty] = useState(false);
-  const [isUserCreationOpen, setIsUserCreationOpen] = useState(false);
   const [newUserId, setNewUserId] = useState('');
   const [newUserName, setNewUserName] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
   const [createUserError, setCreateUserError] = useState<string | null>(null);
   const [createUserSuccess, setCreateUserSuccess] = useState<string | null>(null);
+  const [isUserManagerOpen, setIsUserManagerOpen] = useState(false);
+  const [isSuperAdminOpen, setIsSuperAdminOpen] = useState(false);
+  const [superAdminUsername, setSuperAdminUsername] = useState('');
+  const [superAdminPassword, setSuperAdminPassword] = useState('');
+  const [superAdminToken, setSuperAdminToken] = useState('');
+  const [isSuperAdminEnabled, setIsSuperAdminEnabled] = useState<boolean | null>(null);
+  const [superAdminStatusMessage, setSuperAdminStatusMessage] = useState(
+    'Đang kiểm tra cấu hình superadmin...'
+  );
+  const [isAuthenticatingSuperAdmin, setIsAuthenticatingSuperAdmin] = useState(false);
+  const [isLoadingSuperAdmin, setIsLoadingSuperAdmin] = useState(false);
+  const [superAdminError, setSuperAdminError] = useState<string | null>(null);
+  const [superAdminTenants, setSuperAdminTenants] = useState<TenantSummary[]>([]);
+  const [createTenantError, setCreateTenantError] = useState<string | null>(null);
+  const [createTenantSuccess, setCreateTenantSuccess] = useState<string | null>(null);
+  const [newTenantId, setNewTenantId] = useState('');
+  const [newTenantName, setNewTenantName] = useState('');
+  const [newTenantClientId, setNewTenantClientId] = useState('');
+  const [newTenantApiKey, setNewTenantApiKey] = useState('');
+  const [newTenantPlan, setNewTenantPlan] = useState<'free' | 'pro' | 'enterprise'>('free');
+  const [createTenantAdminError, setCreateTenantAdminError] = useState<string | null>(null);
+  const [createTenantAdminSuccess, setCreateTenantAdminSuccess] = useState<string | null>(null);
+  const [selectedTenantForAdmin, setSelectedTenantForAdmin] = useState('');
+  const [newTenantAdminId, setNewTenantAdminId] = useState('');
+  const [newTenantAdminName, setNewTenantAdminName] = useState('');
+  const [newTenantAdminPassword, setNewTenantAdminPassword] = useState('');
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -288,6 +326,318 @@ export default function App() {
     resetSession(false);
   }, [resetSession]);
 
+  const closeUserManager = useCallback(() => {
+    setIsUserManagerOpen(false);
+    setNewUserId('');
+    setNewUserName('');
+    setNewUserPassword('');
+    setCreateUserError(null);
+    setCreateUserSuccess(null);
+  }, []);
+
+  const handleSuperAdminLogout = useCallback(() => {
+    setSuperAdminToken('');
+    setSuperAdminTenants([]);
+    setSuperAdminError(null);
+    setSuperAdminUsername('');
+    setSuperAdminPassword('');
+    setIsAuthenticatingSuperAdmin(false);
+    setIsLoadingSuperAdmin(false);
+    setCreateTenantError(null);
+    setCreateTenantSuccess(null);
+    setCreateTenantAdminError(null);
+    setCreateTenantAdminSuccess(null);
+    setSelectedTenantForAdmin('');
+    setNewTenantId('');
+    setNewTenantName('');
+    setNewTenantClientId('');
+    setNewTenantApiKey('');
+    setNewTenantPlan('free');
+    setNewTenantAdminId('');
+    setNewTenantAdminName('');
+    setNewTenantAdminPassword('');
+    if (isSuperAdminEnabled === true) {
+      setSuperAdminStatusMessage(
+        'Nhập tài khoản superadmin đã cấu hình qua SUPERADMIN_USER và SUPERADMIN_PASSWORD trên máy chủ.'
+      );
+    }
+  }, [isSuperAdminEnabled]);
+
+  const closeSuperAdmin = useCallback(() => {
+    setIsSuperAdminOpen(false);
+    handleSuperAdminLogout();
+  }, [handleSuperAdminLogout]);
+
+  useEffect(() => {
+    if (superAdminToken && !isSuperAdminOpen) {
+      setIsSuperAdminOpen(true);
+    }
+  }, [superAdminToken, isSuperAdminOpen]);
+
+  useEffect(() => {
+    if (loginMode === 'tenant') {
+      setSuperAdminError(null);
+    } else {
+      setAuthError(null);
+    }
+  }, [loginMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStatus = async () => {
+      try {
+        const response = await fetch('http://localhost:4000/v1/superadmin/status');
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          const text = await response.text();
+          setIsSuperAdminEnabled(false);
+          setSuperAdminStatusMessage(
+            text ||
+              'Superadmin chưa được bật. Cấu hình SUPERADMIN_USER, SUPERADMIN_PASSWORD và SUPERADMIN_TOKEN trên máy chủ để sử dụng.'
+          );
+          return;
+        }
+
+        const payload = (await response.json()) as { enabled?: boolean; message?: string };
+        const enabled = Boolean(payload.enabled);
+        setIsSuperAdminEnabled(enabled);
+        if (payload.message) {
+          setSuperAdminStatusMessage(payload.message);
+        } else if (enabled) {
+          setSuperAdminStatusMessage(
+            'Nhập tài khoản superadmin đã cấu hình qua SUPERADMIN_USER và SUPERADMIN_PASSWORD trên máy chủ.'
+          );
+        } else {
+          setSuperAdminStatusMessage(
+            'Superadmin chưa được bật. Cấu hình SUPERADMIN_USER, SUPERADMIN_PASSWORD và SUPERADMIN_TOKEN trên máy chủ để sử dụng.'
+          );
+        }
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        console.error('Không thể kiểm tra trạng thái superadmin', err);
+        setIsSuperAdminEnabled(false);
+        setSuperAdminStatusMessage(
+          'Không thể kiểm tra trạng thái superadmin. Kiểm tra máy chủ và cấu hình SUPERADMIN_USER, SUPERADMIN_PASSWORD, SUPERADMIN_TOKEN.'
+        );
+      }
+    };
+
+    void loadStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fetchSuperAdminTenants = useCallback(
+    async (token: string) => {
+      if (!token.trim()) {
+        setSuperAdminError('Vui lòng đăng nhập bằng tài khoản superadmin.');
+        setSuperAdminTenants([]);
+        return;
+      }
+
+      setIsLoadingSuperAdmin(true);
+      setSuperAdminError(null);
+
+      try {
+        const response = await fetch('http://localhost:4000/v1/superadmin/tenants', {
+          headers: {
+            authorization: `Bearer ${token.trim()}`
+          }
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || 'Không thể tải danh sách tenant.');
+        }
+
+        const tenants = (await response.json()) as TenantSummary[];
+        setSuperAdminTenants(tenants);
+        setSuperAdminError(null);
+      } catch (err) {
+        console.error('Không thể tải danh sách tenant', err);
+        setSuperAdminError((err as Error).message || 'Không thể tải danh sách tenant.');
+        setSuperAdminTenants([]);
+      } finally {
+        setIsLoadingSuperAdmin(false);
+      }
+    },
+    []
+  );
+
+  const handleSuperAdminLogin = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const username = superAdminUsername.trim();
+      const password = superAdminPassword.trim();
+
+      if (isSuperAdminEnabled !== true) {
+        setSuperAdminError(
+          isSuperAdminEnabled === false
+            ? superAdminStatusMessage
+            : 'Đang kiểm tra trạng thái superadmin, vui lòng thử lại sau.'
+        );
+        return;
+      }
+
+      if (!username || !password) {
+        setSuperAdminError('Vui lòng nhập tài khoản và mật khẩu superadmin.');
+        return;
+      }
+
+      setIsAuthenticatingSuperAdmin(true);
+      setSuperAdminError(null);
+
+      try {
+        const response = await fetch('http://localhost:4000/v1/superadmin/login', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({ username, password })
+        });
+
+        if (!response.ok) {
+          const bodyText = await response.text();
+          let message = 'Không thể đăng nhập superadmin.';
+          if (bodyText) {
+            try {
+              const parsed = JSON.parse(bodyText) as { message?: string };
+              message = parsed.message ?? bodyText;
+            } catch {
+              message = bodyText;
+            }
+          }
+          throw new Error(message);
+        }
+
+        const result = (await response.json()) as { token?: string };
+        if (!result.token) {
+          throw new Error('Máy chủ không trả về token superadmin.');
+        }
+
+        setSuperAdminToken(result.token);
+        setSuperAdminError(null);
+        await fetchSuperAdminTenants(result.token);
+      } catch (err) {
+        console.error('Không thể đăng nhập superadmin', err);
+        setSuperAdminToken('');
+        setSuperAdminTenants([]);
+        setSuperAdminError((err as Error).message || 'Không thể đăng nhập superadmin.');
+      } finally {
+        setIsAuthenticatingSuperAdmin(false);
+      }
+    },
+    [superAdminUsername, superAdminPassword, fetchSuperAdminTenants, isSuperAdminEnabled, superAdminStatusMessage]
+  );
+
+  const handleCreateTenant = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const token = superAdminToken.trim();
+    if (!token) {
+      setCreateTenantError('Vui lòng đăng nhập superadmin trước khi thực hiện thao tác.');
+      return;
+    }
+
+    if (!newTenantId.trim() || !newTenantClientId.trim() || !newTenantApiKey.trim()) {
+      setCreateTenantError('Vui lòng nhập đầy đủ thông tin tenant.');
+      return;
+    }
+
+    setCreateTenantError(null);
+    setCreateTenantSuccess(null);
+
+    try {
+      const response = await fetch('http://localhost:4000/v1/superadmin/tenants', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          id: newTenantId.trim(),
+          name: newTenantName.trim() || newTenantId.trim(),
+          clientId: newTenantClientId.trim(),
+          apiKey: newTenantApiKey.trim(),
+          plan: newTenantPlan
+        })
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Không thể tạo tenant mới.');
+      }
+
+      setCreateTenantSuccess('Tạo tenant thành công.');
+      setNewTenantId('');
+      setNewTenantName('');
+      setNewTenantClientId('');
+      setNewTenantApiKey('');
+      await fetchSuperAdminTenants(token);
+    } catch (err) {
+      console.error('Không thể tạo tenant mới', err);
+      setCreateTenantError((err as Error).message || 'Không thể tạo tenant mới.');
+    }
+  };
+
+  const handleCreateTenantAdmin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const token = superAdminToken.trim();
+    if (!token) {
+      setCreateTenantAdminError('Vui lòng đăng nhập superadmin trước khi thực hiện thao tác.');
+      return;
+    }
+
+    if (!selectedTenantForAdmin) {
+      setCreateTenantAdminError('Vui lòng chọn tenant.');
+      return;
+    }
+
+    if (!newTenantAdminId.trim() || !newTenantAdminPassword.trim()) {
+      setCreateTenantAdminError('Vui lòng nhập tài khoản và mật khẩu cho quản trị viên.');
+      return;
+    }
+
+    setCreateTenantAdminError(null);
+    setCreateTenantAdminSuccess(null);
+
+    try {
+      const response = await fetch(`http://localhost:4000/v1/superadmin/tenants/${selectedTenantForAdmin}/users`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          userId: newTenantAdminId.trim(),
+          displayName: newTenantAdminName.trim() || newTenantAdminId.trim(),
+          password: newTenantAdminPassword.trim()
+        })
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Không thể tạo quản trị viên.');
+      }
+
+      setCreateTenantAdminSuccess('Đã tạo quản trị viên đầu tiên cho tenant.');
+      setNewTenantAdminId('');
+      setNewTenantAdminName('');
+      setNewTenantAdminPassword('');
+      await fetchSuperAdminTenants(token);
+    } catch (err) {
+      console.error('Không thể tạo quản trị viên', err);
+      setCreateTenantAdminError((err as Error).message || 'Không thể tạo quản trị viên.');
+    }
+  };
+
   const userOptions = useMemo<UserOption[]>(
     () =>
       tenantUsers.map((user) => ({
@@ -331,6 +681,33 @@ export default function App() {
       setCreateUserError(null);
     }
   }, [createUserError, newUserId, newUserPassword]);
+
+  useEffect(() => {
+    if (superAdminError !== 'Vui lòng nhập tài khoản và mật khẩu superadmin.') return;
+    if (superAdminUsername.trim() && superAdminPassword.trim()) {
+      setSuperAdminError(null);
+    }
+  }, [superAdminError, superAdminUsername, superAdminPassword]);
+
+  useEffect(() => {
+    if (!isSuperAdminOpen) return;
+    if (!superAdminToken.trim()) return;
+    void fetchSuperAdminTenants(superAdminToken.trim());
+  }, [isSuperAdminOpen, superAdminToken, fetchSuperAdminTenants]);
+
+  useEffect(() => {
+    if (!superAdminTenants.length) {
+      setSelectedTenantForAdmin('');
+      return;
+    }
+
+    setSelectedTenantForAdmin((prev) => {
+      if (prev && superAdminTenants.some((tenant) => tenant.id === prev)) {
+        return prev;
+      }
+      return superAdminTenants[0]?.id ?? '';
+    });
+  }, [superAdminTenants]);
 
   const memberOptions = useMemo(
     () => userOptions.filter((option) => option.value !== sessionUser?.userId),
@@ -1075,21 +1452,27 @@ export default function App() {
       return;
     }
 
+    if (!isAuthenticated || !accessToken) {
+      setCreateUserError('Bạn cần đăng nhập bằng tài khoản quản trị để tạo người dùng mới.');
+      return;
+    }
+
+    if (!isAdmin) {
+      setCreateUserError('Chỉ quản trị viên mới có thể tạo người dùng mới.');
+      return;
+    }
+
     setIsCreatingUser(true);
     setCreateUserError(null);
     setCreateUserSuccess(null);
 
     try {
       const url = new URL(`http://localhost:4000/v1/tenants/${tenantId}/users`);
-      if (!accessToken) {
-        url.searchParams.set('clientId', clientId);
-      }
-
       const response = await fetch(url.toString(), {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {})
+          authorization: `Bearer ${accessToken}`
         },
         body: JSON.stringify({
           userId,
@@ -1128,17 +1511,10 @@ export default function App() {
         const next = [...prev.filter((user) => user.userId !== profile.userId), profile];
         return next.sort((a, b) => a.displayName.localeCompare(b.displayName, 'vi', { sensitivity: 'base' }));
       });
-      setSelectedLoginUser({
-        value: profile.userId,
-        label: profile.displayName,
-        roles: profile.roles,
-        status: profile.status,
-        lastLoginAt: profile.lastLoginAt ?? null
-      });
       setNewUserId('');
       setNewUserName('');
       setNewUserPassword('');
-      setCreateUserSuccess('Tạo tài khoản thành công! Bạn có thể đăng nhập ngay.');
+      setCreateUserSuccess('Tạo người dùng thành công.');
     } catch (err) {
       console.error('Không thể tạo người dùng mới', err);
       setCreateUserError((err as Error).message || 'Không thể tạo người dùng mới.');
@@ -1153,6 +1529,7 @@ export default function App() {
     : 'Chọn một cuộc trò chuyện hoặc tạo mới';
 
   const isAuthenticated = Boolean(sessionUser && accessToken);
+  const isAdmin = sessionUser?.roles.includes('admin') ?? false;
 
   const canSubmitConversation =
     isAuthenticated &&
@@ -1242,6 +1619,23 @@ export default function App() {
               <MessageCirclePlus size={18} aria-hidden />
               <span>Tạo cuộc trò chuyện</span>
             </button>
+            {isAuthenticated && isAdmin && (
+              <button
+                type="button"
+                className="manage-users-button"
+                onClick={() => {
+                  setIsUserManagerOpen(true);
+                  setCreateUserError(null);
+                  setCreateUserSuccess(null);
+                  setNewUserId('');
+                  setNewUserName('');
+                  setNewUserPassword('');
+                }}
+              >
+                <ShieldCheck size={18} aria-hidden />
+                <span>Quản lý người dùng</span>
+              </button>
+            )}
             {!isAuthenticated && (
               <small className="sidebar-hint">Đăng nhập để bắt đầu cuộc trò chuyện mới.</small>
             )}
@@ -1483,22 +1877,7 @@ export default function App() {
                 closeMenuOnSelect={false}
                 noOptionsMessage={() => 'Không tìm thấy thành viên phù hợp'}
                 formatOptionLabel={(option: UserOption) => (
-                  <div className="user-option">
-                    <div className="user-option__main">
-                      <span className="user-option__name">{option.label}</span>
-                      <span className="user-option__id">{option.value}</span>
-                    </div>
-                    <div className="user-option__meta">
-                      {option.roles.map((role) => (
-                        <span key={role} className="chip chip--role">
-                          {role}
-                        </span>
-                      ))}
-                      <span className={`chip chip--status chip--status-${option.status}`}>
-                        {option.status === 'active' ? 'Hoạt động' : 'Đã khóa'}
-                      </span>
-                    </div>
-                  </div>
+                  <span className="user-option__name-only">{option.label}</span>
                 )}
                 isDisabled={!memberOptions.length}
               />
@@ -1534,131 +1913,445 @@ export default function App() {
         </div>
       )}
 
+      {isUserManagerOpen && (
+        <div
+          className="create-dialog"
+          role="dialog"
+          aria-modal="true"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeUserManager();
+            }
+          }}
+        >
+          <form className="create-card create-card--manager" onSubmit={handleCreateUser}>
+            <header className="create-card__header">
+              <div className="create-card__title">
+                <ShieldCheck size={20} aria-hidden />
+                <div>
+                  <h3>Quản lý người dùng</h3>
+                  <p>Thêm hoặc xem nhanh danh sách thành viên của tenant.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="create-card__close"
+                onClick={closeUserManager}
+                aria-label="Đóng quản lý người dùng"
+              >
+                <X size={16} aria-hidden />
+              </button>
+            </header>
+
+            <div className="user-manager__content">
+              <section className="user-manager__section">
+                <h4>Thành viên hiện có</h4>
+                <ul className="user-manager__list">
+                  {tenantUsers.length ? (
+                    tenantUsers.map((user) => (
+                      <li key={user.userId}>
+                        <strong>{user.displayName}</strong>
+                        <span>{user.userId}</span>
+                        <small>{user.roles.length ? user.roles.join(', ') : 'member'}</small>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="user-manager__empty">Chưa có người dùng nào trong tenant.</li>
+                  )}
+                </ul>
+              </section>
+
+              <section className="user-manager__section">
+                <h4>Thêm người dùng mới</h4>
+                <label>
+                  Tài khoản đăng nhập
+                  <input
+                    value={newUserId}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserId(event.target.value)}
+                    placeholder="Ví dụ: user:khachhang"
+                    autoComplete="username"
+                  />
+                </label>
+                <label>
+                  Tên hiển thị
+                  <input
+                    value={newUserName}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserName(event.target.value)}
+                    placeholder="Tên sẽ hiển thị với mọi người"
+                    autoComplete="name"
+                  />
+                </label>
+                <label>
+                  Mật khẩu
+                  <input
+                    type="password"
+                    value={newUserPassword}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserPassword(event.target.value)}
+                    placeholder="Đặt mật khẩu cho tài khoản"
+                    autoComplete="new-password"
+                  />
+                </label>
+                {createUserError && <p className="create-card__error">{createUserError}</p>}
+                {createUserSuccess && <p className="create-card__success">{createUserSuccess}</p>}
+              </section>
+            </div>
+
+            <div className="create-card__actions">
+              <button type="button" className="create-card__cancel" onClick={closeUserManager}>
+                Đóng
+              </button>
+              <button type="submit" disabled={isCreatingUser}>
+                {isCreatingUser ? 'Đang tạo...' : 'Tạo người dùng'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {!isAuthenticated && (
         <div className="login-overlay" role="dialog" aria-modal="true">
           <div className="login-dialog">
-            <form className="login-card" onSubmit={handleLogin}>
-              <h2>Đăng nhập vào VIChat</h2>
-              <p className="login-helper">Chọn tài khoản sẵn có và nhập mật khẩu để bắt đầu trò chuyện.</p>
-              <label>
-                Tài khoản
-                <Select<UserOption>
-                  classNamePrefix="rs"
-                  styles={sharedSelectStyles as StylesConfig<UserOption, false>}
-                  options={userOptions}
-                  value={selectedLoginUser}
-                  onChange={(option) => setSelectedLoginUser((option as SingleValue<UserOption>) ?? null)}
-                  placeholder="Chọn tài khoản của bạn"
-                  formatOptionLabel={(option: UserOption) => (
-                    <div className="user-option">
-                      <div className="user-option__main">
-                        <span className="user-option__name">{option.label}</span>
-                        <span className="user-option__id">{option.value}</span>
-                      </div>
-                      <div className="user-option__meta">
-                        {option.roles.map((role) => (
-                          <span key={role} className="chip chip--role">
-                            {role}
-                          </span>
-                        ))}
-                        <span className={`chip chip--status chip--status-${option.status}`}>
-                          {option.status === 'active' ? 'Hoạt động' : 'Đã khóa'}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  isLoading={!userOptions.length}
-                  noOptionsMessage={() => 'Chưa có người dùng khả dụng'}
-                />
-              </label>
-              <label>
-                Mật khẩu
-                <input
-                  type="password"
-                  value={loginSecret}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setLoginSecret(event.target.value)}
-                  placeholder="Nhập mật khẩu để đăng nhập"
-                  autoComplete="current-password"
-                />
-              </label>
-              {authError && <p className="login-error">{authError}</p>}
-              <button type="submit" disabled={isAuthenticating}>
-                {isAuthenticating ? 'Đang đăng nhập...' : 'Đăng nhập'}
-              </button>
-            </form>
-
-            <div className="login-divider" aria-hidden>
-              <span>Hoặc</span>
-            </div>
-
-            <form className="login-card login-card--secondary" onSubmit={handleCreateUser}>
-              <h2>Tạo tài khoản mới</h2>
-              <p className="login-helper">
-                Chưa có tài khoản? Tạo nhanh một tài khoản để kết nối cùng đội hỗ trợ.
-              </p>
-              {!isUserCreationOpen ? (
+            <div className="login-card">
+              <div className="login-toggle" role="tablist" aria-label="Chọn phương thức đăng nhập">
                 <button
                   type="button"
-                  className="login-card__secondary-action"
-                  onClick={() => {
-                    setIsUserCreationOpen(true);
-                    setCreateUserError(null);
-                    setCreateUserSuccess(null);
-                  }}
+                  role="tab"
+                  aria-selected={loginMode === 'tenant'}
+                  className={loginMode === 'tenant' ? 'login-toggle__button login-toggle__button--active' : 'login-toggle__button'}
+                  onClick={() => setLoginMode('tenant')}
                 >
-                  Bắt đầu tạo tài khoản
+                  Người dùng tenant
                 </button>
-              ) : (
-                <>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={loginMode === 'superadmin'}
+                  className={
+                    loginMode === 'superadmin'
+                      ? 'login-toggle__button login-toggle__button--active'
+                      : 'login-toggle__button'
+                  }
+                  onClick={() => setLoginMode('superadmin')}
+                >
+                  Superadmin
+                </button>
+              </div>
+
+              {loginMode === 'tenant' ? (
+                <form className="login-card__form" onSubmit={handleLogin}>
+                  <h2>Đăng nhập vào VIChat</h2>
+                  <p className="login-helper">Chọn tài khoản sẵn có và nhập mật khẩu để bắt đầu trò chuyện.</p>
                   <label>
-                    Tài khoản đăng nhập
-                    <input
-                      value={newUserId}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserId(event.target.value)}
-                      placeholder="Ví dụ: user:khachhang"
-                      autoComplete="username"
-                    />
-                  </label>
-                  <label>
-                    Tên hiển thị
-                    <input
-                      value={newUserName}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserName(event.target.value)}
-                      placeholder="Tên sẽ hiển thị với mọi người"
-                      autoComplete="name"
+                    Tài khoản
+                    <Select<UserOption>
+                      classNamePrefix="rs"
+                      styles={sharedSelectStyles as StylesConfig<UserOption, false>}
+                      options={userOptions}
+                      value={selectedLoginUser}
+                      onChange={(option) => setSelectedLoginUser((option as SingleValue<UserOption>) ?? null)}
+                      placeholder="Chọn tài khoản của bạn"
+                      formatOptionLabel={(option: UserOption) => (
+                        <span className="user-option__name-only">{option.label}</span>
+                      )}
+                      isLoading={!userOptions.length}
+                      noOptionsMessage={() => 'Chưa có người dùng khả dụng'}
                     />
                   </label>
                   <label>
                     Mật khẩu
                     <input
                       type="password"
-                      value={newUserPassword}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserPassword(event.target.value)}
-                      placeholder="Đặt mật khẩu cho tài khoản"
-                      autoComplete="new-password"
+                      value={loginSecret}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setLoginSecret(event.target.value)}
+                      placeholder="Nhập mật khẩu để đăng nhập"
+                      autoComplete="current-password"
                     />
                   </label>
-                  {createUserError && <p className="login-error">{createUserError}</p>}
-                  {createUserSuccess && <p className="login-success">{createUserSuccess}</p>}
+                  {authError && <p className="login-error">{authError}</p>}
+                  <button type="submit" disabled={isAuthenticating}>
+                    {isAuthenticating ? 'Đang đăng nhập...' : 'Đăng nhập'}
+                  </button>
+                </form>
+              ) : (
+                <form className="login-card__form" onSubmit={handleSuperAdminLogin}>
+                  <h2>Đăng nhập Superadmin</h2>
+                  <p className="login-helper login-helper--left">
+                    Superadmin dùng để cấu hình tenant và tạo quản trị viên đầu tiên cho từng đơn vị.
+                  </p>
+                  <label>
+                    Tài khoản superadmin
+                    <input
+                      value={superAdminUsername}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminUsername(event.target.value)}
+                      placeholder="Ví dụ: superadmin"
+                      autoComplete="username"
+                      disabled={isSuperAdminEnabled !== true}
+                    />
+                  </label>
+                  <label>
+                    Mật khẩu
+                    <input
+                      type="password"
+                      value={superAdminPassword}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminPassword(event.target.value)}
+                      placeholder="Nhập mật khẩu superadmin"
+                      autoComplete="current-password"
+                      disabled={isSuperAdminEnabled !== true}
+                    />
+                  </label>
+                  <small className="login-hint">{superAdminStatusMessage}</small>
+                  {superAdminError && <p className="login-error">{superAdminError}</p>}
                   <div className="login-actions">
+                    <button
+                      type="submit"
+                      disabled={isAuthenticatingSuperAdmin || isSuperAdminEnabled !== true}
+                    >
+                      {isAuthenticatingSuperAdmin
+                        ? 'Đang đăng nhập...'
+                        : superAdminToken
+                        ? 'Đăng nhập lại'
+                        : 'Đăng nhập'}
+                    </button>
                     <button
                       type="button"
                       className="login-card__secondary-action"
-                      onClick={() => {
-                        setIsUserCreationOpen(false);
-                        setCreateUserError(null);
-                        setCreateUserSuccess(null);
-                      }}
+                      onClick={() => setIsSuperAdminOpen(true)}
+                      disabled={!superAdminToken}
                     >
-                      Hủy
-                    </button>
-                    <button type="submit" disabled={isCreatingUser}>
-                      {isCreatingUser ? 'Đang tạo...' : 'Tạo người dùng'}
+                      Mở bảng điều khiển
                     </button>
                   </div>
-                </>
+                  {superAdminToken && (
+                    <p className="login-success">
+                      Đã đăng nhập superadmin, bạn có thể mở bảng điều khiển để quản lý tenant.
+                    </p>
+                  )}
+                </form>
               )}
-            </form>
+            </div>
+
+            <div className="login-divider" aria-hidden>
+              <span>Quản trị</span>
+            </div>
+
+            <div className="login-card login-card--secondary login-card--info">
+              <h2>Quản lý người dùng</h2>
+              <p className="login-helper">
+                Sau khi đăng nhập superadmin, bạn có thể thêm tenant và người dùng đầu tiên cho từng đơn vị.
+              </p>
+              <button
+                type="button"
+                className="login-card__secondary-action"
+                onClick={() => setIsSuperAdminOpen(true)}
+              >
+                Mở màn hình Superadmin
+              </button>
+              <small className="login-hint">
+                {superAdminToken
+                  ? 'Đang đăng nhập superadmin. Mở màn hình để quản lý tenant ngay.'
+                  : 'Đăng nhập bằng tài khoản superadmin để kích hoạt bảng điều khiển quản trị.'}
+              </small>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isSuperAdminOpen && (
+        <div
+          className="create-dialog"
+          role="dialog"
+          aria-modal="true"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeSuperAdmin();
+            }
+          }}
+        >
+          <div className="superadmin-card">
+            <header className="create-card__header">
+              <div className="create-card__title">
+                <ShieldCheck size={20} aria-hidden />
+                <div>
+                  <h3>Superadmin</h3>
+                  <p>Quản lý tenant và tạo quản trị viên đầu tiên.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="create-card__close"
+                onClick={closeSuperAdmin}
+                aria-label="Đóng màn hình superadmin"
+              >
+                <X size={16} aria-hidden />
+              </button>
+            </header>
+
+            <section className="superadmin-section">
+              <h4>Đăng nhập superadmin</h4>
+              <form className="superadmin-form" onSubmit={handleSuperAdminLogin}>
+                <label>
+                  Tài khoản
+                  <input
+                    value={superAdminUsername}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminUsername(event.target.value)}
+                    placeholder="Ví dụ: superadmin"
+                    autoComplete="username"
+                    disabled={isSuperAdminEnabled !== true}
+                  />
+                </label>
+                <label>
+                  Mật khẩu
+                  <input
+                    type="password"
+                    value={superAdminPassword}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminPassword(event.target.value)}
+                    placeholder="Nhập mật khẩu superadmin"
+                    autoComplete="current-password"
+                    disabled={isSuperAdminEnabled !== true}
+                  />
+                </label>
+                <div className="superadmin-actions">
+                  <button
+                    type="submit"
+                    disabled={isAuthenticatingSuperAdmin || isSuperAdminEnabled !== true}
+                  >
+                    {isAuthenticatingSuperAdmin
+                      ? 'Đang đăng nhập...'
+                      : superAdminToken
+                      ? 'Đăng nhập lại'
+                      : 'Đăng nhập'}
+                  </button>
+                  {superAdminToken && (
+                    <>
+                      <button
+                        type="button"
+                        className="superadmin-actions__secondary"
+                        onClick={() => void fetchSuperAdminTenants(superAdminToken)}
+                        disabled={
+                          isLoadingSuperAdmin || isAuthenticatingSuperAdmin || isSuperAdminEnabled !== true
+                        }
+                      >
+                        {isLoadingSuperAdmin ? 'Đang tải...' : 'Tải danh sách tenant'}
+                      </button>
+                      <button
+                        type="button"
+                        className="superadmin-actions__secondary"
+                        onClick={handleSuperAdminLogout}
+                      >
+                        Đăng xuất
+                      </button>
+                    </>
+                  )}
+                </div>
+                <small className="superadmin-hint">{superAdminStatusMessage}</small>
+              </form>
+              {superAdminToken && (
+                <p className="superadmin-hint superadmin-hint--success">Đã đăng nhập superadmin, bạn có thể quản lý tenant.</p>
+              )}
+              {superAdminError && <p className="create-card__error">{superAdminError}</p>}
+            </section>
+
+            <section className="superadmin-section">
+              <h4>Tenant hiện có</h4>
+              <ul className="superadmin-tenant-list">
+                {superAdminToken ? (
+                  superAdminTenants.length ? (
+                    superAdminTenants.map((tenant) => (
+                      <li key={tenant.id}>
+                        <div>
+                          <strong>{tenant.name}</strong>
+                          <small>ID: {tenant.id}</small>
+                        </div>
+                        <span className="badge">Plan: {tenant.plan}</span>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="superadmin-tenant-empty">Chưa có tenant nào hoặc thiếu quyền truy cập.</li>
+                  )
+                ) : (
+                  <li className="superadmin-tenant-empty">Đăng nhập superadmin để xem danh sách tenant.</li>
+                )}
+              </ul>
+            </section>
+
+            <section className="superadmin-section">
+              <h4>Thêm tenant mới</h4>
+              <form className="superadmin-form" onSubmit={handleCreateTenant}>
+                <label>
+                  Tenant ID
+                  <input value={newTenantId} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantId(event.target.value)} placeholder="Ví dụ: tenant-ban-hang" />
+                </label>
+                <label>
+                  Tên hiển thị
+                  <input value={newTenantName} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantName(event.target.value)} placeholder="Tên hiển thị cho tenant" />
+                </label>
+                <label>
+                  Client ID
+                  <input value={newTenantClientId} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantClientId(event.target.value)} placeholder="Ví dụ: app-ban-hang" />
+                </label>
+                <label>
+                  API key
+                  <input value={newTenantApiKey} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantApiKey(event.target.value)} placeholder="Khóa API cho client" />
+                </label>
+                <label>
+                  Gói dịch vụ
+                  <select value={newTenantPlan} onChange={(event) => setNewTenantPlan(event.target.value as 'free' | 'pro' | 'enterprise')}>
+                    <option value="free">Free</option>
+                    <option value="pro">Pro</option>
+                    <option value="enterprise">Enterprise</option>
+                  </select>
+                </label>
+                {createTenantError && <p className="create-card__error">{createTenantError}</p>}
+                {createTenantSuccess && <p className="create-card__success">{createTenantSuccess}</p>}
+                <div className="superadmin-actions">
+                  <button type="submit" disabled={!superAdminToken}>
+                    Tạo tenant
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section className="superadmin-section">
+              <h4>Thêm quản trị viên đầu tiên</h4>
+              <form className="superadmin-form" onSubmit={handleCreateTenantAdmin}>
+                <label>
+                  Tenant
+                  <select
+                    value={selectedTenantForAdmin}
+                    onChange={(event) => setSelectedTenantForAdmin(event.target.value)}
+                    disabled={!superAdminToken}
+                  >
+                    <option value="" disabled>
+                      Chọn tenant
+                    </option>
+                    {superAdminTenants.map((tenant) => (
+                      <option key={tenant.id} value={tenant.id}>
+                        {tenant.name} ({tenant.id})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Tài khoản quản trị
+                  <input value={newTenantAdminId} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantAdminId(event.target.value)} placeholder="Ví dụ: admin:tenant" />
+                </label>
+                <label>
+                  Tên hiển thị
+                  <input value={newTenantAdminName} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantAdminName(event.target.value)} placeholder="Tên quản trị viên" />
+                </label>
+                <label>
+                  Mật khẩu
+                  <input type="password" value={newTenantAdminPassword} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantAdminPassword(event.target.value)} placeholder="Mật khẩu đăng nhập" />
+                </label>
+                {createTenantAdminError && <p className="create-card__error">{createTenantAdminError}</p>}
+                {createTenantAdminSuccess && <p className="create-card__success">{createTenantAdminSuccess}</p>}
+                <div className="superadmin-actions">
+                  <button type="submit" disabled={!superAdminToken}>
+                    Tạo quản trị viên
+                  </button>
+                </div>
+              </form>
+            </section>
           </div>
         </div>
       )}
