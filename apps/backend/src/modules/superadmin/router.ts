@@ -43,7 +43,16 @@ function safeEqual(left: string, right: string): boolean {
 
 export async function registerSuperAdminRoutes(app: FastifyInstance): Promise<void> {
   const env = getEnv();
-  const superToken = `Bearer ${env.SUPERADMIN_TOKEN}`;
+  const { SUPERADMIN_USER, SUPERADMIN_PASSWORD, SUPERADMIN_TOKEN } = env;
+
+  if (!SUPERADMIN_USER || !SUPERADMIN_PASSWORD || !SUPERADMIN_TOKEN) {
+    app.log.warn(
+      'Superadmin credentials are not fully configured. Superadmin routes have been disabled.'
+    );
+    return;
+  }
+
+  const superToken = `Bearer ${SUPERADMIN_TOKEN}`;
 
   app.post('/v1/superadmin/login', async (request, reply) => {
     let parsed: z.infer<typeof superAdminLoginSchema>;
@@ -53,14 +62,14 @@ export async function registerSuperAdminRoutes(app: FastifyInstance): Promise<vo
       return reply.status(400).send({ message: 'Invalid payload', detail: (err as Error).message });
     }
 
-    const usernameMatches = safeEqual(parsed.username, env.SUPERADMIN_USER);
-    const passwordMatches = safeEqual(parsed.password, env.SUPERADMIN_PASSWORD);
+    const usernameMatches = safeEqual(parsed.username, SUPERADMIN_USER);
+    const passwordMatches = safeEqual(parsed.password, SUPERADMIN_PASSWORD);
 
     if (!usernameMatches || !passwordMatches) {
       return reply.status(401).send({ message: 'Sai thông tin đăng nhập superadmin.' });
     }
 
-    return reply.status(200).send({ token: env.SUPERADMIN_TOKEN });
+    return reply.status(200).send({ token: SUPERADMIN_TOKEN });
   });
 
   app.register(async (superApp) => {
