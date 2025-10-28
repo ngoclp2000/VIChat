@@ -1,8 +1,14 @@
+import { timingSafeEqual } from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { getEnv } from '../../config/env';
 import { createTenant, getTenantById, listTenants } from '../tenants/store';
 import { createTenantUser } from '../users/store';
+
+const superAdminLoginSchema = z.object({
+  username: z.string().min(3).max(64),
+  password: z.string().min(6).max(128)
+});
 
 const limitsSchema = z
   .object({
@@ -26,9 +32,45 @@ const createTenantAdminSchema = z.object({
   password: z.string().min(6).max(128)
 });
 
+function safeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
 export async function registerSuperAdminRoutes(app: FastifyInstance): Promise<void> {
   const env = getEnv();
-  const superToken = `Bearer ${env.SUPERADMIN_TOKEN}`;
+  const { SUPERADMIN_USER, SUPERADMIN_PASSWORD, SUPERADMIN_TOKEN } = env;
+
+  if (!SUPERADMIN_USER || !SUPERADMIN_PASSWORD || !SUPERADMIN_TOKEN) {
+    app.log.warn(
+      'Superadmin credentials are not fully configured. Superadmin routes have been disabled.'
+    );
+    return;
+  }
+
+  const superToken = `Bearer ${SUPERADMIN_TOKEN}`;
+
+  app.post('/v1/superadmin/login', async (request, reply) => {
+    let parsed: z.infer<typeof superAdminLoginSchema>;
+    try {
+      parsed = superAdminLoginSchema.parse(request.body);
+    } catch (err) {
+      return reply.status(400).send({ message: 'Invalid payload', detail: (err as Error).message });
+    }
+
+    const usernameMatches = safeEqual(parsed.username, SUPERADMIN_USER);
+    const passwordMatches = safeEqual(parsed.password, SUPERADMIN_PASSWORD);
+
+    if (!usernameMatches || !passwordMatches) {
+      return reply.status(401).send({ message: 'Sai thông tin đăng nhập superadmin.' });
+    }
+
+    return reply.status(200).send({ token: SUPERADMIN_TOKEN });
+  });
 
   app.register(async (superApp) => {
     superApp.addHook('onRequest', (request, reply, done) => {

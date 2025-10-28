@@ -1415,10 +1415,39 @@ body {
   transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
 }
 
+.superadmin-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+  filter: grayscale(0.15);
+}
+
 .superadmin-actions button:hover {
   transform: translateY(-1px);
   box-shadow: 0 16px 36px rgba(59, 130, 246, 0.4);
   filter: saturate(1.05);
+}
+
+.superadmin-actions__secondary {
+  background: rgba(30, 41, 59, 0.65);
+  box-shadow: none;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.superadmin-actions__secondary:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: rgba(59, 130, 246, 0.5);
+  color: rgba(191, 219, 254, 0.95);
+  filter: none;
+}
+
+.superadmin-actions__secondary:disabled {
+  opacity: 0.4;
+  border-color: rgba(148, 163, 184, 0.2);
+  color: rgba(148, 163, 184, 0.8);
 }
 
 .superadmin-tenant-list {
@@ -1491,6 +1520,26 @@ body {
   outline: none;
   border-color: rgba(124, 58, 237, 0.6);
   box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.25);
+}
+
+.superadmin-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: rgba(226, 232, 240, 0.75);
+}
+
+.superadmin-hint code {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  background: rgba(30, 41, 59, 0.8);
+  border-radius: 0.4rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  color: rgba(148, 197, 255, 0.95);
+}
+
+.superadmin-hint--success {
+  color: rgba(134, 239, 172, 0.85);
 }
 
 .login-overlay {

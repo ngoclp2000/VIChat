@@ -11,7 +11,9 @@ export interface Env {
   MONGODB_URI: string;
   MONGODB_DB: string;
   MESSAGE_ENCRYPTION_KEY: string;
-  SUPERADMIN_TOKEN: string;
+  SUPERADMIN_USER?: string;
+  SUPERADMIN_PASSWORD?: string;
+  SUPERADMIN_TOKEN?: string;
 }
 
 export function getEnv(): Env {
@@ -25,6 +27,8 @@ export function getEnv(): Env {
     MONGODB_DB: process.env.MONGODB_DB ?? 'vichat',
     MESSAGE_ENCRYPTION_KEY:
       process.env.MESSAGE_ENCRYPTION_KEY ?? 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=',
-    SUPERADMIN_TOKEN: process.env.SUPERADMIN_TOKEN ?? 'superadmin-secret'
+    SUPERADMIN_USER: process.env.SUPERADMIN_USER?.trim() || undefined,
+    SUPERADMIN_PASSWORD: process.env.SUPERADMIN_PASSWORD?.trim() || undefined,
+    SUPERADMIN_TOKEN: process.env.SUPERADMIN_TOKEN?.trim() || undefined
   };
 }

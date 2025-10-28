@@ -246,7 +246,10 @@ export default function App() {
   const [createUserSuccess, setCreateUserSuccess] = useState<string | null>(null);
   const [isUserManagerOpen, setIsUserManagerOpen] = useState(false);
   const [isSuperAdminOpen, setIsSuperAdminOpen] = useState(false);
+  const [superAdminUsername, setSuperAdminUsername] = useState('');
+  const [superAdminPassword, setSuperAdminPassword] = useState('');
   const [superAdminToken, setSuperAdminToken] = useState('');
+  const [isAuthenticatingSuperAdmin, setIsAuthenticatingSuperAdmin] = useState(false);
   const [isLoadingSuperAdmin, setIsLoadingSuperAdmin] = useState(false);
   const [superAdminError, setSuperAdminError] = useState<string | null>(null);
   const [superAdminTenants, setSuperAdminTenants] = useState<TenantSummary[]>([]);
@@ -327,19 +330,39 @@ export default function App() {
     setCreateUserSuccess(null);
   }, []);
 
-  const closeSuperAdmin = useCallback(() => {
-    setIsSuperAdminOpen(false);
+  const handleSuperAdminLogout = useCallback(() => {
+    setSuperAdminToken('');
+    setSuperAdminTenants([]);
+    setSuperAdminError(null);
+    setSuperAdminUsername('');
+    setSuperAdminPassword('');
+    setIsAuthenticatingSuperAdmin(false);
+    setIsLoadingSuperAdmin(false);
     setCreateTenantError(null);
     setCreateTenantSuccess(null);
     setCreateTenantAdminError(null);
     setCreateTenantAdminSuccess(null);
-    setSuperAdminError(null);
+    setSelectedTenantForAdmin('');
+    setNewTenantId('');
+    setNewTenantName('');
+    setNewTenantClientId('');
+    setNewTenantApiKey('');
+    setNewTenantPlan('free');
+    setNewTenantAdminId('');
+    setNewTenantAdminName('');
+    setNewTenantAdminPassword('');
   }, []);
+
+  const closeSuperAdmin = useCallback(() => {
+    setIsSuperAdminOpen(false);
+    handleSuperAdminLogout();
+  }, [handleSuperAdminLogout]);
 
   const fetchSuperAdminTenants = useCallback(
     async (token: string) => {
       if (!token.trim()) {
-        setSuperAdminError('Vui lòng nhập token superadmin.');
+        setSuperAdminError('Vui lòng đăng nhập bằng tài khoản superadmin.');
+        setSuperAdminTenants([]);
         return;
       }
 
@@ -372,11 +395,68 @@ export default function App() {
     []
   );
 
+  const handleSuperAdminLogin = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const username = superAdminUsername.trim();
+      const password = superAdminPassword.trim();
+
+      if (!username || !password) {
+        setSuperAdminError('Vui lòng nhập tài khoản và mật khẩu superadmin.');
+        return;
+      }
+
+      setIsAuthenticatingSuperAdmin(true);
+      setSuperAdminError(null);
+
+      try {
+        const response = await fetch('http://localhost:4000/v1/superadmin/login', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({ username, password })
+        });
+
+        if (!response.ok) {
+          const bodyText = await response.text();
+          let message = 'Không thể đăng nhập superadmin.';
+          if (bodyText) {
+            try {
+              const parsed = JSON.parse(bodyText) as { message?: string };
+              message = parsed.message ?? bodyText;
+            } catch {
+              message = bodyText;
+            }
+          }
+          throw new Error(message);
+        }
+
+        const result = (await response.json()) as { token?: string };
+        if (!result.token) {
+          throw new Error('Máy chủ không trả về token superadmin.');
+        }
+
+        setSuperAdminToken(result.token);
+        setSuperAdminError(null);
+        await fetchSuperAdminTenants(result.token);
+      } catch (err) {
+        console.error('Không thể đăng nhập superadmin', err);
+        setSuperAdminToken('');
+        setSuperAdminTenants([]);
+        setSuperAdminError((err as Error).message || 'Không thể đăng nhập superadmin.');
+      } finally {
+        setIsAuthenticatingSuperAdmin(false);
+      }
+    },
+    [superAdminUsername, superAdminPassword, fetchSuperAdminTenants]
+  );
+
   const handleCreateTenant = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const token = superAdminToken.trim();
     if (!token) {
-      setCreateTenantError('Cần nhập token superadmin hợp lệ.');
+      setCreateTenantError('Vui lòng đăng nhập superadmin trước khi thực hiện thao tác.');
       return;
     }
 
@@ -425,7 +505,7 @@ export default function App() {
     event.preventDefault();
     const token = superAdminToken.trim();
     if (!token) {
-      setCreateTenantAdminError('Cần nhập token superadmin hợp lệ.');
+      setCreateTenantAdminError('Vui lòng đăng nhập superadmin trước khi thực hiện thao tác.');
       return;
     }
 
@@ -515,6 +595,13 @@ export default function App() {
       setCreateUserError(null);
     }
   }, [createUserError, newUserId, newUserPassword]);
+
+  useEffect(() => {
+    if (superAdminError !== 'Vui lòng nhập tài khoản và mật khẩu superadmin.') return;
+    if (superAdminUsername.trim() && superAdminPassword.trim()) {
+      setSuperAdminError(null);
+    }
+  }, [superAdminError, superAdminUsername, superAdminPassword]);
 
   useEffect(() => {
     if (!isSuperAdminOpen) return;
@@ -1927,38 +2014,85 @@ export default function App() {
             </header>
 
             <section className="superadmin-section">
-              <label>
-                Token superadmin
-                <input
-                  type="password"
-                  value={superAdminToken}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminToken(event.target.value)}
-                  placeholder="Nhập token được cấp"
-                />
-              </label>
-              <div className="superadmin-actions">
-                <button type="button" onClick={() => void fetchSuperAdminTenants(superAdminToken)}>
-                  {isLoadingSuperAdmin ? 'Đang tải...' : 'Tải danh sách tenant'}
-                </button>
-              </div>
+              <h4>Đăng nhập superadmin</h4>
+              <form className="superadmin-form" onSubmit={handleSuperAdminLogin}>
+                <label>
+                  Tài khoản
+                  <input
+                    value={superAdminUsername}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminUsername(event.target.value)}
+                    placeholder="Ví dụ: superadmin"
+                    autoComplete="username"
+                  />
+                </label>
+                <label>
+                  Mật khẩu
+                  <input
+                    type="password"
+                    value={superAdminPassword}
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminPassword(event.target.value)}
+                    placeholder="Nhập mật khẩu superadmin"
+                    autoComplete="current-password"
+                  />
+                </label>
+                <div className="superadmin-actions">
+                  <button type="submit" disabled={isAuthenticatingSuperAdmin}>
+                    {isAuthenticatingSuperAdmin
+                      ? 'Đang đăng nhập...'
+                      : superAdminToken
+                      ? 'Đăng nhập lại'
+                      : 'Đăng nhập'}
+                  </button>
+                  {superAdminToken && (
+                    <>
+                      <button
+                        type="button"
+                        className="superadmin-actions__secondary"
+                        onClick={() => void fetchSuperAdminTenants(superAdminToken)}
+                        disabled={isLoadingSuperAdmin || isAuthenticatingSuperAdmin}
+                      >
+                        {isLoadingSuperAdmin ? 'Đang tải...' : 'Tải danh sách tenant'}
+                      </button>
+                      <button
+                        type="button"
+                        className="superadmin-actions__secondary"
+                        onClick={handleSuperAdminLogout}
+                      >
+                        Đăng xuất
+                      </button>
+                    </>
+                  )}
+                </div>
+                <small className="superadmin-hint">
+                  Tài khoản mặc định: <code>superadmin</code> / <code>superadmin-password</code>. Có thể thay đổi qua biến
+                  môi trường.
+                </small>
+              </form>
+              {superAdminToken && (
+                <p className="superadmin-hint superadmin-hint--success">Đã đăng nhập superadmin, bạn có thể quản lý tenant.</p>
+              )}
               {superAdminError && <p className="create-card__error">{superAdminError}</p>}
             </section>
 
             <section className="superadmin-section">
               <h4>Tenant hiện có</h4>
               <ul className="superadmin-tenant-list">
-                {superAdminTenants.length ? (
-                  superAdminTenants.map((tenant) => (
-                    <li key={tenant.id}>
-                      <div>
-                        <strong>{tenant.name}</strong>
-                        <small>ID: {tenant.id}</small>
-                      </div>
-                      <span className="badge">Plan: {tenant.plan}</span>
-                    </li>
-                  ))
+                {superAdminToken ? (
+                  superAdminTenants.length ? (
+                    superAdminTenants.map((tenant) => (
+                      <li key={tenant.id}>
+                        <div>
+                          <strong>{tenant.name}</strong>
+                          <small>ID: {tenant.id}</small>
+                        </div>
+                        <span className="badge">Plan: {tenant.plan}</span>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="superadmin-tenant-empty">Chưa có tenant nào hoặc thiếu quyền truy cập.</li>
+                  )
                 ) : (
-                  <li className="superadmin-tenant-empty">Chưa có tenant nào hoặc thiếu quyền truy cập.</li>
+                  <li className="superadmin-tenant-empty">Đăng nhập superadmin để xem danh sách tenant.</li>
                 )}
               </ul>
             </section>
@@ -1993,7 +2127,9 @@ export default function App() {
                 {createTenantError && <p className="create-card__error">{createTenantError}</p>}
                 {createTenantSuccess && <p className="create-card__success">{createTenantSuccess}</p>}
                 <div className="superadmin-actions">
-                  <button type="submit">Tạo tenant</button>
+                  <button type="submit" disabled={!superAdminToken}>
+                    Tạo tenant
+                  </button>
                 </div>
               </form>
             </section>
@@ -2003,7 +2139,11 @@ export default function App() {
               <form className="superadmin-form" onSubmit={handleCreateTenantAdmin}>
                 <label>
                   Tenant
-                  <select value={selectedTenantForAdmin} onChange={(event) => setSelectedTenantForAdmin(event.target.value)}>
+                  <select
+                    value={selectedTenantForAdmin}
+                    onChange={(event) => setSelectedTenantForAdmin(event.target.value)}
+                    disabled={!superAdminToken}
+                  >
                     <option value="" disabled>
                       Chọn tenant
                     </option>
@@ -2029,7 +2169,9 @@ export default function App() {
                 {createTenantAdminError && <p className="create-card__error">{createTenantAdminError}</p>}
                 {createTenantAdminSuccess && <p className="create-card__success">{createTenantAdminSuccess}</p>}
                 <div className="superadmin-actions">
-                  <button type="submit">Tạo quản trị viên</button>
+                  <button type="submit" disabled={!superAdminToken}>
+                    Tạo quản trị viên
+                  </button>
                 </div>
               </form>
             </section>
