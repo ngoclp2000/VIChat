@@ -363,6 +363,34 @@ body {
   box-shadow: none;
 }
 
+.manage-users-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: none;
+  border-radius: 0.85rem;
+  padding: 0.7rem 1rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  color: #fdf4ff;
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.6), rgba(236, 72, 153, 0.55));
+  box-shadow: 0 12px 24px rgba(124, 58, 237, 0.25);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.manage-users-button svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.manage-users-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 32px rgba(124, 58, 237, 0.35);
+  filter: saturate(1.1);
+}
+
 .sidebar-hint {
   margin: 0;
   font-size: 0.75rem;
@@ -1007,6 +1035,12 @@ body {
   gap: 0.35rem;
 }
 
+.user-option__name-only {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
@@ -1062,6 +1096,10 @@ body {
   flex-direction: column;
   gap: 1rem;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.45);
+}
+
+.create-card--manager {
+  width: min(640px, 100%);
 }
 
 .create-card__header {
@@ -1197,6 +1235,16 @@ body {
   border-radius: 0.85rem;
 }
 
+.create-card__success {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #bbf7d0;
+  background: rgba(34, 197, 94, 0.18);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.85rem;
+}
+
 .create-card__actions {
   display: flex;
   align-items: center;
@@ -1243,6 +1291,206 @@ body {
   cursor: not-allowed;
   box-shadow: none;
   transform: none;
+}
+
+.user-manager__content {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  align-items: flex-start;
+}
+
+.user-manager__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.user-manager__section h4 {
+  margin: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.user-manager__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.user-manager__list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 0.85rem;
+  background: rgba(30, 41, 59, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.user-manager__list li strong {
+  font-size: 0.9rem;
+}
+
+.user-manager__list li span {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  opacity: 0.65;
+}
+
+.user-manager__list li small {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(94, 234, 212, 0.8);
+}
+
+.user-manager__empty {
+  text-align: center;
+  padding: 0.75rem;
+  border-radius: 0.85rem;
+  border: 1px dashed rgba(148, 163, 184, 0.3);
+  background: rgba(30, 41, 59, 0.6);
+  opacity: 0.7;
+}
+
+.superadmin-card {
+  width: min(760px, 100%);
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 1.25rem;
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 28px 64px rgba(15, 23, 42, 0.5);
+}
+
+.superadmin-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+  padding-top: 1rem;
+}
+
+.superadmin-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.superadmin-section h4 {
+  margin: 0;
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.superadmin-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.superadmin-actions button {
+  border: none;
+  border-radius: 0.85rem;
+  padding: 0.65rem 1.2rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  color: #f8fafc;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.7), rgba(124, 58, 237, 0.7));
+  box-shadow: 0 12px 28px rgba(59, 130, 246, 0.3);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.superadmin-actions button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 36px rgba(59, 130, 246, 0.4);
+  filter: saturate(1.05);
+}
+
+.superadmin-tenant-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.superadmin-tenant-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.9rem;
+  background: rgba(30, 41, 59, 0.78);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.superadmin-tenant-list li div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.superadmin-tenant-list li small {
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  opacity: 0.65;
+}
+
+.superadmin-tenant-empty {
+  text-align: center;
+  padding: 0.85rem;
+  border-radius: 0.9rem;
+  border: 1px dashed rgba(148, 163, 184, 0.3);
+  background: rgba(30, 41, 59, 0.6);
+  opacity: 0.7;
+}
+
+.superadmin-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.superadmin-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+}
+
+.superadmin-form input,
+.superadmin-form select {
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.75);
+  color: inherit;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.9rem;
+}
+
+.superadmin-form input:focus,
+.superadmin-form select:focus {
+  outline: none;
+  border-color: rgba(124, 58, 237, 0.6);
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.25);
 }
 
 .login-overlay {
@@ -1336,6 +1584,24 @@ body {
 
 .login-card--secondary {
   background: rgba(15, 23, 42, 0.82);
+}
+
+.login-card--info {
+  align-items: flex-start;
+  text-align: left;
+  gap: 1rem;
+}
+
+.login-card--info .login-helper {
+  text-align: left;
+}
+
+.login-hint {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: rgba(226, 232, 240, 0.6);
+  text-align: left;
 }
 
 .login-divider {
