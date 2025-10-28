@@ -302,6 +302,8 @@ export default function App() {
   const [newTenantAdminName, setNewTenantAdminName] = useState('');
   const [newTenantAdminPassword, setNewTenantAdminPassword] = useState('');
 
+  const isAuthenticated = Boolean(sessionUser && accessToken && activeTenant);
+
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const sendingMessageRef = useRef(false);
@@ -1677,7 +1679,6 @@ export default function App() {
     ? `${selectedConversation.type === 'group' ? 'Nhóm' : '1 vs 1'} · ${selectedConversation.members.length} thành viên`
     : 'Chọn một cuộc trò chuyện hoặc tạo mới';
 
-  const isAuthenticated = Boolean(sessionUser && accessToken && activeTenant);
   const isAdmin = sessionUser?.roles.includes('admin') ?? false;
 
   const canSubmitConversation =
