@@ -249,6 +249,10 @@ export default function App() {
   const [superAdminUsername, setSuperAdminUsername] = useState('');
   const [superAdminPassword, setSuperAdminPassword] = useState('');
   const [superAdminToken, setSuperAdminToken] = useState('');
+  const [isSuperAdminEnabled, setIsSuperAdminEnabled] = useState<boolean | null>(null);
+  const [superAdminStatusMessage, setSuperAdminStatusMessage] = useState(
+    'Đang kiểm tra cấu hình superadmin...'
+  );
   const [isAuthenticatingSuperAdmin, setIsAuthenticatingSuperAdmin] = useState(false);
   const [isLoadingSuperAdmin, setIsLoadingSuperAdmin] = useState(false);
   const [superAdminError, setSuperAdminError] = useState<string | null>(null);
@@ -351,12 +355,70 @@ export default function App() {
     setNewTenantAdminId('');
     setNewTenantAdminName('');
     setNewTenantAdminPassword('');
-  }, []);
+    if (isSuperAdminEnabled === true) {
+      setSuperAdminStatusMessage(
+        'Nhập tài khoản superadmin đã cấu hình qua SUPERADMIN_USER và SUPERADMIN_PASSWORD trên máy chủ.'
+      );
+    }
+  }, [isSuperAdminEnabled]);
 
   const closeSuperAdmin = useCallback(() => {
     setIsSuperAdminOpen(false);
     handleSuperAdminLogout();
   }, [handleSuperAdminLogout]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStatus = async () => {
+      try {
+        const response = await fetch('http://localhost:4000/v1/superadmin/status');
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          const text = await response.text();
+          setIsSuperAdminEnabled(false);
+          setSuperAdminStatusMessage(
+            text ||
+              'Superadmin chưa được bật. Cấu hình SUPERADMIN_USER, SUPERADMIN_PASSWORD và SUPERADMIN_TOKEN trên máy chủ để sử dụng.'
+          );
+          return;
+        }
+
+        const payload = (await response.json()) as { enabled?: boolean; message?: string };
+        const enabled = Boolean(payload.enabled);
+        setIsSuperAdminEnabled(enabled);
+        if (payload.message) {
+          setSuperAdminStatusMessage(payload.message);
+        } else if (enabled) {
+          setSuperAdminStatusMessage(
+            'Nhập tài khoản superadmin đã cấu hình qua SUPERADMIN_USER và SUPERADMIN_PASSWORD trên máy chủ.'
+          );
+        } else {
+          setSuperAdminStatusMessage(
+            'Superadmin chưa được bật. Cấu hình SUPERADMIN_USER, SUPERADMIN_PASSWORD và SUPERADMIN_TOKEN trên máy chủ để sử dụng.'
+          );
+        }
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        console.error('Không thể kiểm tra trạng thái superadmin', err);
+        setIsSuperAdminEnabled(false);
+        setSuperAdminStatusMessage(
+          'Không thể kiểm tra trạng thái superadmin. Kiểm tra máy chủ và cấu hình SUPERADMIN_USER, SUPERADMIN_PASSWORD, SUPERADMIN_TOKEN.'
+        );
+      }
+    };
+
+    void loadStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const fetchSuperAdminTenants = useCallback(
     async (token: string) => {
@@ -400,6 +462,15 @@ export default function App() {
       event.preventDefault();
       const username = superAdminUsername.trim();
       const password = superAdminPassword.trim();
+
+      if (isSuperAdminEnabled !== true) {
+        setSuperAdminError(
+          isSuperAdminEnabled === false
+            ? superAdminStatusMessage
+            : 'Đang kiểm tra trạng thái superadmin, vui lòng thử lại sau.'
+        );
+        return;
+      }
 
       if (!username || !password) {
         setSuperAdminError('Vui lòng nhập tài khoản và mật khẩu superadmin.');
@@ -449,7 +520,7 @@ export default function App() {
         setIsAuthenticatingSuperAdmin(false);
       }
     },
-    [superAdminUsername, superAdminPassword, fetchSuperAdminTenants]
+    [superAdminUsername, superAdminPassword, fetchSuperAdminTenants, isSuperAdminEnabled, superAdminStatusMessage]
   );
 
   const handleCreateTenant = async (event: FormEvent<HTMLFormElement>) => {
@@ -2023,6 +2094,7 @@ export default function App() {
                     onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminUsername(event.target.value)}
                     placeholder="Ví dụ: superadmin"
                     autoComplete="username"
+                    disabled={isSuperAdminEnabled !== true}
                   />
                 </label>
                 <label>
@@ -2033,10 +2105,14 @@ export default function App() {
                     onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminPassword(event.target.value)}
                     placeholder="Nhập mật khẩu superadmin"
                     autoComplete="current-password"
+                    disabled={isSuperAdminEnabled !== true}
                   />
                 </label>
                 <div className="superadmin-actions">
-                  <button type="submit" disabled={isAuthenticatingSuperAdmin}>
+                  <button
+                    type="submit"
+                    disabled={isAuthenticatingSuperAdmin || isSuperAdminEnabled !== true}
+                  >
                     {isAuthenticatingSuperAdmin
                       ? 'Đang đăng nhập...'
                       : superAdminToken
@@ -2049,7 +2125,9 @@ export default function App() {
                         type="button"
                         className="superadmin-actions__secondary"
                         onClick={() => void fetchSuperAdminTenants(superAdminToken)}
-                        disabled={isLoadingSuperAdmin || isAuthenticatingSuperAdmin}
+                        disabled={
+                          isLoadingSuperAdmin || isAuthenticatingSuperAdmin || isSuperAdminEnabled !== true
+                        }
                       >
                         {isLoadingSuperAdmin ? 'Đang tải...' : 'Tải danh sách tenant'}
                       </button>
@@ -2063,10 +2141,7 @@ export default function App() {
                     </>
                   )}
                 </div>
-                <small className="superadmin-hint">
-                  Tài khoản mặc định: <code>superadmin</code> / <code>superadmin-password</code>. Có thể thay đổi qua biến
-                  môi trường.
-                </small>
+                <small className="superadmin-hint">{superAdminStatusMessage}</small>
               </form>
               {superAdminToken && (
                 <p className="superadmin-hint superadmin-hint--success">Đã đăng nhập superadmin, bạn có thể quản lý tenant.</p>

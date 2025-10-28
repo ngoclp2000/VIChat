@@ -46,6 +46,14 @@ export async function registerSuperAdminRoutes(app: FastifyInstance): Promise<vo
   const { SUPERADMIN_USER, SUPERADMIN_PASSWORD, SUPERADMIN_TOKEN } = env;
 
   if (!SUPERADMIN_USER || !SUPERADMIN_PASSWORD || !SUPERADMIN_TOKEN) {
+    app.get('/v1/superadmin/status', async (_request, reply) => {
+      return reply.send({
+        enabled: false,
+        message:
+          'Superadmin đang bị vô hiệu hóa. Cấu hình SUPERADMIN_USER, SUPERADMIN_PASSWORD và SUPERADMIN_TOKEN trên máy chủ để kích hoạt.'
+      });
+    });
+
     app.log.warn(
       'Superadmin credentials are not fully configured. Superadmin routes have been disabled.'
     );
@@ -53,6 +61,10 @@ export async function registerSuperAdminRoutes(app: FastifyInstance): Promise<vo
   }
 
   const superToken = `Bearer ${SUPERADMIN_TOKEN}`;
+
+  app.get('/v1/superadmin/status', async (_request, reply) => {
+    return reply.send({ enabled: true });
+  });
 
   app.post('/v1/superadmin/login', async (request, reply) => {
     let parsed: z.infer<typeof superAdminLoginSchema>;
