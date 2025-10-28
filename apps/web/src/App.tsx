@@ -19,8 +19,6 @@ import ChatKit from '@vichat/sdk';
 import type { ConversationDescriptor, MessagePayload, StickerPayload } from '@vichat/shared';
 import './App.css';
 
-const tenantId = 'tenant-demo';
-const clientId = 'demo-app';
 const deviceInfo = { id: 'web-demo-device', platform: 'web' as const };
 
 interface TenantUserProfile {
@@ -48,6 +46,12 @@ interface TenantSummary {
   };
 }
 
+interface TenantDirectorySummary {
+  id: string;
+  name: string;
+  clientId: string;
+}
+
 interface UserOption {
   value: string;
   label: string;
@@ -55,6 +59,12 @@ interface UserOption {
   status: 'active' | 'disabled';
   lastLoginAt?: string | null;
   [key: string]: unknown;
+}
+
+interface TenantOption {
+  value: string;
+  label: string;
+  clientId: string;
 }
 
 type ConversationView = ConversationDescriptor & {
@@ -116,6 +126,11 @@ const SESSION_STORAGE_KEY = 'vichat.session';
 interface StoredSession {
   token: string;
   expiresAt: number;
+  tenant: {
+    id: string;
+    name: string;
+    clientId: string;
+  };
   user: {
     userId: string;
     displayName: string;
@@ -142,11 +157,20 @@ function readStoredSession(): StoredSession | null {
       parsed.user &&
       typeof parsed.user.userId === 'string' &&
       typeof parsed.user.displayName === 'string' &&
-      Array.isArray(parsed.user.roles)
+      Array.isArray(parsed.user.roles) &&
+      parsed.tenant &&
+      typeof parsed.tenant.id === 'string' &&
+      typeof parsed.tenant.name === 'string' &&
+      typeof parsed.tenant.clientId === 'string'
     ) {
       return {
         token: parsed.token,
         expiresAt: parsed.expiresAt,
+        tenant: {
+          id: parsed.tenant.id,
+          name: parsed.tenant.name,
+          clientId: parsed.tenant.clientId
+        },
         user: {
           userId: parsed.user.userId,
           displayName: parsed.user.displayName,
@@ -227,6 +251,12 @@ export default function App() {
   const [selectedMemberOptions, setSelectedMemberOptions] = useState<UserOption[]>([]);
   const [newConversationName, setNewConversationName] = useState('');
   const [tenantUsers, setTenantUsers] = useState<TenantUserProfile[]>([]);
+  const [tenantCatalog, setTenantCatalog] = useState<TenantDirectorySummary[]>([]);
+  const [selectedLoginTenant, setSelectedLoginTenant] = useState<TenantOption | null>(null);
+  const [activeTenant, setActiveTenant] = useState<TenantOption | null>(null);
+  const [isLoadingTenants, setIsLoadingTenants] = useState(false);
+  const [isLoadingTenantDirectory, setIsLoadingTenantDirectory] = useState(false);
+  const [tenantDirectoryError, setTenantDirectoryError] = useState<string | null>(null);
   const [showStickers, setShowStickers] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
@@ -289,6 +319,13 @@ export default function App() {
 
     setAccessToken(stored.token);
     setSessionUser(stored.user);
+    const tenantOption: TenantOption = {
+      value: stored.tenant.id,
+      label: stored.tenant.name,
+      clientId: stored.tenant.clientId
+    };
+    setActiveTenant(tenantOption);
+    setSelectedLoginTenant(tenantOption);
     setSelectedLoginUser({
       value: stored.user.userId,
       label: stored.user.displayName,
@@ -304,6 +341,7 @@ export default function App() {
     });
     setAccessToken('');
     setSessionUser(null);
+    setActiveTenant(null);
     setSelectedConversationId(null);
     setConversations([]);
     setMessages([]);
@@ -316,6 +354,7 @@ export default function App() {
     setSelectedLoginUser(null);
     setLoginSecret('');
     setError(null);
+    setTenantDirectoryError(null);
     if (!keepAuthError) {
       setAuthError(null);
     }
@@ -383,6 +422,69 @@ export default function App() {
   }, [loginMode]);
 
   useEffect(() => {
+    if (isAuthenticated) {
+      return;
+    }
+
+    const tenant = selectedLoginTenant;
+    if (!tenant) {
+      setTenantUsers([]);
+      setSelectedLoginUser(null);
+      setIsLoadingTenantDirectory(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingTenantDirectory(true);
+    setTenantDirectoryError(null);
+
+    const loadDirectory = async () => {
+      try {
+        const response = await fetch(
+          `http://localhost:4000/v1/tenants/${tenant.value}/users?clientId=${encodeURIComponent(tenant.clientId)}`
+        );
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || 'Không thể tải danh sách người dùng.');
+        }
+
+        const users = (await response.json()) as TenantUserDirectoryEntry[];
+        if (cancelled) {
+          return;
+        }
+
+        setTenantUsers(
+          users.map((user) => ({
+            userId: user.userId,
+            displayName: user.displayName,
+            roles: [],
+            status: 'active',
+            lastLoginAt: null
+          }))
+        );
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        console.warn('Không thể tải danh sách người dùng tenant', err);
+        setTenantUsers([]);
+        setTenantDirectoryError('Không thể tải người dùng của đơn vị đã chọn.');
+      } finally {
+        if (!cancelled) {
+          setIsLoadingTenantDirectory(false);
+        }
+      }
+    };
+
+    void loadDirectory();
+
+    return () => {
+      cancelled = true;
+      setIsLoadingTenantDirectory(false);
+    };
+  }, [isAuthenticated, selectedLoginTenant]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const loadStatus = async () => {
@@ -435,6 +537,58 @@ export default function App() {
     };
   }, []);
 
+  const refreshTenantCatalog = useCallback(async () => {
+    setIsLoadingTenants(true);
+    setTenantDirectoryError(null);
+
+    try {
+      const response = await fetch('http://localhost:4000/v1/tenants');
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Không thể tải danh sách đơn vị.');
+      }
+
+      const payload = (await response.json()) as TenantDirectorySummary[];
+      const sorted = [...payload].sort((a, b) => a.name.localeCompare(b.name, 'vi', { sensitivity: 'base' }));
+      setTenantCatalog(sorted);
+    } catch (err) {
+      console.error('Không thể tải danh sách đơn vị', err);
+      setTenantCatalog([]);
+      setTenantDirectoryError('Không thể tải danh sách đơn vị. Vui lòng thử lại sau.');
+    } finally {
+      setIsLoadingTenants(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshTenantCatalog();
+  }, [refreshTenantCatalog]);
+
+  useEffect(() => {
+    if (!tenantCatalog.length) {
+      if (!isAuthenticated) {
+        setSelectedLoginTenant(null);
+      }
+      return;
+    }
+
+    setSelectedLoginTenant((prev) => {
+      const existing = prev ? tenantCatalog.find((tenant) => tenant.id === prev.value) : null;
+      if (existing) {
+        if (existing.name !== prev.label || existing.clientId !== prev.clientId) {
+          return { value: existing.id, label: existing.name, clientId: existing.clientId };
+        }
+        return prev;
+      }
+
+      const fallback = activeTenant
+        ? tenantCatalog.find((tenant) => tenant.id === activeTenant.value)
+        : tenantCatalog[0];
+
+      return fallback ? { value: fallback.id, label: fallback.name, clientId: fallback.clientId } : null;
+    });
+  }, [tenantCatalog, activeTenant, isAuthenticated]);
+
   const fetchSuperAdminTenants = useCallback(
     async (token: string) => {
       if (!token.trim()) {
@@ -461,6 +615,7 @@ export default function App() {
         const tenants = (await response.json()) as TenantSummary[];
         setSuperAdminTenants(tenants);
         setSuperAdminError(null);
+        void refreshTenantCatalog();
       } catch (err) {
         console.error('Không thể tải danh sách tenant', err);
         setSuperAdminError((err as Error).message || 'Không thể tải danh sách tenant.');
@@ -469,7 +624,7 @@ export default function App() {
         setIsLoadingSuperAdmin(false);
       }
     },
-    []
+    [refreshTenantCatalog]
   );
 
   const handleSuperAdminLogin = useCallback(
@@ -583,6 +738,7 @@ export default function App() {
       setNewTenantClientId('');
       setNewTenantApiKey('');
       await fetchSuperAdminTenants(token);
+      void refreshTenantCatalog();
     } catch (err) {
       console.error('Không thể tạo tenant mới', err);
       setCreateTenantError((err as Error).message || 'Không thể tạo tenant mới.');
@@ -652,6 +808,11 @@ export default function App() {
     [tenantUsers]
   );
 
+  const tenantOptions = useMemo<TenantOption[]>(
+    () => tenantCatalog.map((tenant) => ({ value: tenant.id, label: tenant.name, clientId: tenant.clientId })),
+    [tenantCatalog]
+  );
+
   useEffect(() => {
     if (!selectedLoginUser) return;
     const next = userOptions.find((option) => option.value === selectedLoginUser.value);
@@ -672,10 +833,10 @@ export default function App() {
 
   useEffect(() => {
     if (!authError) return;
-    if (loginSecret || selectedLoginUser) {
+    if (loginSecret || selectedLoginUser || selectedLoginTenant) {
       setAuthError(null);
     }
-  }, [authError, loginSecret, selectedLoginUser]);
+  }, [authError, loginSecret, selectedLoginUser, selectedLoginTenant]);
 
   useEffect(() => {
     if (createUserError !== 'Vui lòng nhập tài khoản và mật khẩu.') return;
@@ -935,41 +1096,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadDirectory() {
-      try {
-        const response = await fetch(
-          `http://localhost:4000/v1/tenants/${tenantId}/users?clientId=${encodeURIComponent(clientId)}`
-        );
-        if (!response.ok) {
-          throw new Error('Unable to load tenant directory');
-        }
-        const users = (await response.json()) as TenantUserDirectoryEntry[];
-        if (!cancelled) {
-          setTenantUsers(
-            users.map((user) => ({
-              userId: user.userId,
-              displayName: user.displayName,
-              roles: [],
-              status: 'active',
-              lastLoginAt: null
-            }))
-          );
-        }
-      } catch (err) {
-        console.warn('Không thể tải danh sách người dùng tenant', err);
-      }
-    }
-
-    void loadDirectory();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
@@ -1003,7 +1129,7 @@ export default function App() {
   }, [selectedConversationId]);
 
   useEffect(() => {
-    if (!sessionUser || !accessToken) {
+    if (!sessionUser || !accessToken || !activeTenant) {
       setChat((prev) => {
         prev?.disconnect();
         return null;
@@ -1012,10 +1138,14 @@ export default function App() {
       setSelectedConversationId(null);
       setMessages([]);
       setStatus('disconnected');
+      if (!accessToken) {
+        setTenantUsers([]);
+      }
       return;
     }
 
     const activeUser = sessionUser;
+    const tenantContext = activeTenant;
     let isMounted = true;
     let cleanupListeners: (() => void) | undefined;
     let instance: ChatKit | null = null;
@@ -1027,8 +1157,8 @@ export default function App() {
 
       try {
         const chatInstance = await ChatKit.init({
-          tenantId,
-          clientId,
+          tenantId: tenantContext.value,
+          clientId: tenantContext.clientId,
           token: accessToken,
           device: deviceInfo,
           realtimeUrl: 'ws://localhost:4000/realtime'
@@ -1112,7 +1242,7 @@ export default function App() {
         setSelectedConversationId(sorted[0]?.id ?? null);
 
         try {
-          const usersResponse = await fetch(`http://localhost:4000/v1/tenants/${tenantId}/users`, {
+          const usersResponse = await fetch(`http://localhost:4000/v1/tenants/${tenantContext.value}/users`, {
             headers: {
               authorization: `Bearer ${accessToken}`
             }
@@ -1150,7 +1280,7 @@ export default function App() {
       }
       setChat((prev) => (prev === instance ? null : prev));
     };
-  }, [accessToken, sessionUser, handleError, resetSession]);
+  }, [accessToken, sessionUser, activeTenant, handleError, resetSession]);
 
   useEffect(() => {
     setShowStickers(false);
@@ -1351,6 +1481,11 @@ export default function App() {
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
+    if (!selectedLoginTenant) {
+      setAuthError('Vui lòng chọn đơn vị để đăng nhập.');
+      return;
+    }
+
     if (!selectedLoginUser) {
       setAuthError('Hãy chọn người dùng để đăng nhập.');
       return;
@@ -1371,8 +1506,8 @@ export default function App() {
           'content-type': 'application/json'
         },
         body: JSON.stringify({
-          clientId,
-          tenantId,
+          clientId: selectedLoginTenant.clientId,
+          tenantId: selectedLoginTenant.value,
           userId: selectedLoginUser.value,
           userSecret: loginSecret,
           scopes: loginScopes
@@ -1410,6 +1545,7 @@ export default function App() {
         displayName: selectedLoginUser.label,
         roles: selectedLoginUser.roles
       };
+      setActiveTenant(selectedLoginTenant);
       setAccessToken(payload.accessToken);
       setSessionUser(identity);
       setLoginSecret('');
@@ -1424,6 +1560,11 @@ export default function App() {
       writeStoredSession({
         token: payload.accessToken,
         expiresAt: Date.now() + expiresInMs,
+        tenant: {
+          id: selectedLoginTenant.value,
+          name: selectedLoginTenant.label,
+          clientId: selectedLoginTenant.clientId
+        },
         user: identity
       });
     } catch (err) {
@@ -1435,6 +1576,7 @@ export default function App() {
       setAuthError(message);
       setAccessToken('');
       setSessionUser(null);
+      setActiveTenant(null);
       writeStoredSession(null);
     } finally {
       setIsAuthenticating(false);
@@ -1464,12 +1606,17 @@ export default function App() {
       return;
     }
 
+    if (!activeTenant) {
+      setCreateUserError('Không xác định được đơn vị hiện tại.');
+      return;
+    }
+
     setIsCreatingUser(true);
     setCreateUserError(null);
     setCreateUserSuccess(null);
 
     try {
-      const url = new URL(`http://localhost:4000/v1/tenants/${tenantId}/users`);
+      const url = new URL(`http://localhost:4000/v1/tenants/${activeTenant.value}/users`);
       const response = await fetch(url.toString(), {
         method: 'POST',
         headers: {
@@ -1530,7 +1677,7 @@ export default function App() {
     ? `${selectedConversation.type === 'group' ? 'Nhóm' : '1 vs 1'} · ${selectedConversation.members.length} thành viên`
     : 'Chọn một cuộc trò chuyện hoặc tạo mới';
 
-  const isAuthenticated = Boolean(sessionUser && accessToken);
+  const isAuthenticated = Boolean(sessionUser && accessToken && activeTenant);
   const isAdmin = sessionUser?.roles.includes('admin') ?? false;
 
   const canSubmitConversation =
@@ -1664,7 +1811,9 @@ export default function App() {
               </div>
             </div>
             <div className="chat-meta">
-              <span className="badge">Tenant: {tenantId}</span>
+              <span className="badge">
+                Tenant: {activeTenant ? `${activeTenant.label} (${activeTenant.value})` : 'Chưa chọn'}
+              </span>
               {selectedConversation && <span className="badge">Conv: {selectedConversation.id}</span>}
             </div>
           </header>
@@ -2044,6 +2193,21 @@ export default function App() {
                   <h2>Đăng nhập vào VIChat</h2>
                   <p className="login-helper">Chọn tài khoản sẵn có và nhập mật khẩu để bắt đầu trò chuyện.</p>
                   <label>
+                    Đơn vị
+                    <Select<TenantOption>
+                      classNamePrefix="rs"
+                      styles={sharedSelectStyles as StylesConfig<TenantOption, false>}
+                      options={tenantOptions}
+                      value={selectedLoginTenant}
+                      onChange={(option) =>
+                        setSelectedLoginTenant((option as SingleValue<TenantOption>) ?? null)
+                      }
+                      placeholder="Chọn đơn vị của bạn"
+                      isLoading={isLoadingTenants}
+                      noOptionsMessage={() => 'Chưa có đơn vị khả dụng'}
+                    />
+                  </label>
+                  <label>
                     Tài khoản
                     <Select<UserOption>
                       classNamePrefix="rs"
@@ -2055,10 +2219,12 @@ export default function App() {
                       formatOptionLabel={(option: UserOption) => (
                         <span className="user-option__name-only">{option.label}</span>
                       )}
-                      isLoading={!userOptions.length}
+                      isLoading={isLoadingTenantDirectory}
+                      isDisabled={!selectedLoginTenant || isLoadingTenantDirectory}
                       noOptionsMessage={() => 'Chưa có người dùng khả dụng'}
                     />
                   </label>
+                  {tenantDirectoryError && <p className="login-error">{tenantDirectoryError}</p>}
                   <label>
                     Mật khẩu
                     <input
@@ -2070,7 +2236,10 @@ export default function App() {
                     />
                   </label>
                   {authError && <p className="login-error">{authError}</p>}
-                  <button type="submit" disabled={isAuthenticating}>
+                  <button
+                    type="submit"
+                    disabled={isAuthenticating || isLoadingTenants || !selectedLoginTenant}
+                  >
                     {isAuthenticating ? 'Đang đăng nhập...' : 'Đăng nhập'}
                   </button>
                 </form>

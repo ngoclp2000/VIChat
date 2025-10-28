@@ -3,6 +3,7 @@ import { ZodError } from 'zod';
 import { getEnv } from './config/env';
 import { registerRealtimeGateway } from './modules/realtime/gateway';
 import { seedTenants } from './modules/tenants/store';
+import { registerTenantRoutes } from './modules/tenants/router';
 import { registerConversationRoutes } from './modules/conversations/router';
 import { AuthError, issueAccessToken, validateTokenRequest, verifyAccessToken } from './modules/auth/service';
 import { connectMongo, closeMongo } from './config/mongo';
@@ -115,6 +116,7 @@ export async function createApp() {
     }
   });
 
+  await registerTenantRoutes(app);
   await registerConversationRoutes(app);
   await registerClientRoutes(app);
   await registerUserRoutes(app);
