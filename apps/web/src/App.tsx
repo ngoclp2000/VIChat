@@ -226,9 +226,17 @@ export default function App() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [creationError, setCreationError] = useState<string | null>(null);
   const [isGroupNameDirty, setIsGroupNameDirty] = useState(false);
+  const [isUserCreationOpen, setIsUserCreationOpen] = useState(false);
+  const [newUserId, setNewUserId] = useState('');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [createUserError, setCreateUserError] = useState<string | null>(null);
+  const [createUserSuccess, setCreateUserSuccess] = useState<string | null>(null);
 
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const sendingMessageRef = useRef(false);
 
   useEffect(() => {
     const stored = readStoredSession();
@@ -317,6 +325,13 @@ export default function App() {
     }
   }, [authError, loginSecret, selectedLoginUser]);
 
+  useEffect(() => {
+    if (createUserError !== 'Vui lòng nhập tài khoản và mật khẩu.') return;
+    if (newUserId.trim() && newUserPassword.trim()) {
+      setCreateUserError(null);
+    }
+  }, [createUserError, newUserId, newUserPassword]);
+
   const memberOptions = useMemo(
     () => userOptions.filter((option) => option.value !== sessionUser?.userId),
     [sessionUser?.userId, userOptions]
@@ -337,7 +352,9 @@ export default function App() {
         valueContainer: (base) => ({
           ...base,
           padding: '0.35rem 0.75rem',
-          gap: '0.4rem'
+          gap: '0.4rem',
+          flexWrap: 'wrap',
+          alignItems: 'flex-start'
         }),
         placeholder: (base) => ({
           ...base,
@@ -349,7 +366,8 @@ export default function App() {
           borderRadius: '999px',
           background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(14, 165, 233, 0.25))',
           color: '#e0f2fe',
-          border: '1px solid rgba(14, 165, 233, 0.35)'
+          border: '1px solid rgba(14, 165, 233, 0.35)',
+          margin: '0.15rem'
         }),
         multiValueLabel: (base) => ({
           ...base,
@@ -829,13 +847,24 @@ export default function App() {
 
   const sendMessage = useCallback(async () => {
     if (!chat || !draft.trim() || !selectedConversation || !sessionUser) return;
-    const message = await chat.sendText(selectedConversation, draft);
-    upsertMessage(message);
-    applyMessageToConversation(message, true);
-    setDraft('');
-    setShowStickers(false);
-    setShowEmojiPicker(false);
-  }, [chat, draft, selectedConversation, sessionUser, upsertMessage, applyMessageToConversation]);
+    if (sendingMessageRef.current) return;
+
+    sendingMessageRef.current = true;
+    try {
+      const message = await chat.sendText(selectedConversation, draft);
+      upsertMessage(message);
+      applyMessageToConversation(message, true);
+      setDraft('');
+      setShowStickers(false);
+      setShowEmojiPicker(false);
+      setError((prev) => (prev === 'Không thể gửi tin nhắn. Vui lòng thử lại.' ? null : prev));
+    } catch (err) {
+      console.error('Không thể gửi tin nhắn', err);
+      setError('Không thể gửi tin nhắn. Vui lòng thử lại.');
+    } finally {
+      sendingMessageRef.current = false;
+    }
+  }, [chat, draft, selectedConversation, sessionUser, upsertMessage, applyMessageToConversation, setError]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1033,6 +1062,91 @@ export default function App() {
     }
   };
 
+  const handleCreateUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isCreatingUser) return;
+
+    const userId = newUserId.trim();
+    const displayName = newUserName.trim();
+    const password = newUserPassword.trim();
+
+    if (!userId || !password) {
+      setCreateUserError('Vui lòng nhập tài khoản và mật khẩu.');
+      return;
+    }
+
+    setIsCreatingUser(true);
+    setCreateUserError(null);
+    setCreateUserSuccess(null);
+
+    try {
+      const url = new URL(`http://localhost:4000/v1/tenants/${tenantId}/users`);
+      if (!accessToken) {
+        url.searchParams.set('clientId', clientId);
+      }
+
+      const response = await fetch(url.toString(), {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {})
+        },
+        body: JSON.stringify({
+          userId,
+          displayName: displayName || userId,
+          password
+        })
+      });
+
+      if (!response.ok) {
+        let detail = 'Không thể tạo người dùng mới.';
+        try {
+          const text = await response.text();
+          if (text) {
+            try {
+              const parsed = JSON.parse(text) as { message?: unknown };
+              if (parsed && typeof parsed.message === 'string' && parsed.message.trim()) {
+                detail = parsed.message;
+              } else if (text.trim()) {
+                detail = text;
+              }
+            } catch {
+              if (text.trim()) {
+                detail = text;
+              }
+            }
+          }
+        } catch {
+          // ignore body parse failure
+        }
+
+        throw new Error(detail);
+      }
+
+      const profile = (await response.json()) as TenantUserProfile;
+      setTenantUsers((prev) => {
+        const next = [...prev.filter((user) => user.userId !== profile.userId), profile];
+        return next.sort((a, b) => a.displayName.localeCompare(b.displayName, 'vi', { sensitivity: 'base' }));
+      });
+      setSelectedLoginUser({
+        value: profile.userId,
+        label: profile.displayName,
+        roles: profile.roles,
+        status: profile.status,
+        lastLoginAt: profile.lastLoginAt ?? null
+      });
+      setNewUserId('');
+      setNewUserName('');
+      setNewUserPassword('');
+      setCreateUserSuccess('Tạo tài khoản thành công! Bạn có thể đăng nhập ngay.');
+    } catch (err) {
+      console.error('Không thể tạo người dùng mới', err);
+      setCreateUserError((err as Error).message || 'Không thể tạo người dùng mới.');
+    } finally {
+      setIsCreatingUser(false);
+    }
+  };
+
   const currentConversationLabel = selectedConversation?.name ?? selectedConversation?.id ?? 'Chưa chọn cuộc trò chuyện';
   const currentConversationMeta = selectedConversation
     ? `${selectedConversation.type === 'group' ? 'Nhóm' : '1 vs 1'} · ${selectedConversation.members.length} thành viên`
@@ -1198,12 +1312,12 @@ export default function App() {
               <span className="lock" aria-hidden>
                 <Lock size={16} />
               </span>
-              <span>Được bảo vệ bằng Signal Double Ratchet. Nhập tin nhắn để gửi ngay lập tức.</span>
+              <span>Tin nhắn của bạn được mã hóa đầu cuối. Nhập nội dung và nhấn Enter để gửi ngay.</span>
             </div>
             <div className="composer-inputs">
               <TextareaAutosize
                 className="composer-textarea"
-                placeholder="Nhập tin nhắn E2EE..."
+                placeholder="Nhập tin nhắn của bạn..."
                 value={draft}
                 onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setDraft(event.target.value)}
                 minRows={2}
@@ -1351,7 +1465,7 @@ export default function App() {
               </span>
             </div>
             <p className="create-card__hint">
-              Chọn một thành viên để chat riêng hoặc nhiều thành viên để tạo nhóm. Tên nhóm sẽ được gợi ý tự động.
+              Hãy chọn người bạn muốn trò chuyện. Chọn một người để bắt đầu cuộc trò chuyện riêng hoặc nhiều người để lập nhóm và đặt tên bên dưới.
             </p>
 
             <label className="create-card__field">
@@ -1422,54 +1536,130 @@ export default function App() {
 
       {!isAuthenticated && (
         <div className="login-overlay" role="dialog" aria-modal="true">
-          <form className="login-card" onSubmit={handleLogin}>
-            <h2>Đăng nhập người dùng tenant</h2>
-            <label>
-              Người dùng
-              <Select<UserOption>
-                classNamePrefix="rs"
-                styles={sharedSelectStyles as StylesConfig<UserOption, false>}
-                options={userOptions}
-                value={selectedLoginUser}
-                onChange={(option) => setSelectedLoginUser((option as SingleValue<UserOption>) ?? null)}
-                placeholder="Chọn người dùng"
-                formatOptionLabel={(option: UserOption) => (
-                  <div className="user-option">
-                    <div className="user-option__main">
-                      <span className="user-option__name">{option.label}</span>
-                      <span className="user-option__id">{option.value}</span>
-                    </div>
-                    <div className="user-option__meta">
-                      {option.roles.map((role) => (
-                        <span key={role} className="chip chip--role">
-                          {role}
+          <div className="login-dialog">
+            <form className="login-card" onSubmit={handleLogin}>
+              <h2>Đăng nhập vào VIChat</h2>
+              <p className="login-helper">Chọn tài khoản sẵn có và nhập mật khẩu để bắt đầu trò chuyện.</p>
+              <label>
+                Tài khoản
+                <Select<UserOption>
+                  classNamePrefix="rs"
+                  styles={sharedSelectStyles as StylesConfig<UserOption, false>}
+                  options={userOptions}
+                  value={selectedLoginUser}
+                  onChange={(option) => setSelectedLoginUser((option as SingleValue<UserOption>) ?? null)}
+                  placeholder="Chọn tài khoản của bạn"
+                  formatOptionLabel={(option: UserOption) => (
+                    <div className="user-option">
+                      <div className="user-option__main">
+                        <span className="user-option__name">{option.label}</span>
+                        <span className="user-option__id">{option.value}</span>
+                      </div>
+                      <div className="user-option__meta">
+                        {option.roles.map((role) => (
+                          <span key={role} className="chip chip--role">
+                            {role}
+                          </span>
+                        ))}
+                        <span className={`chip chip--status chip--status-${option.status}`}>
+                          {option.status === 'active' ? 'Hoạt động' : 'Đã khóa'}
                         </span>
-                      ))}
-                      <span className={`chip chip--status chip--status-${option.status}`}>
-                        {option.status === 'active' ? 'Hoạt động' : 'Đã khóa'}
-                      </span>
+                      </div>
                     </div>
+                  )}
+                  isLoading={!userOptions.length}
+                  noOptionsMessage={() => 'Chưa có người dùng khả dụng'}
+                />
+              </label>
+              <label>
+                Mật khẩu
+                <input
+                  type="password"
+                  value={loginSecret}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setLoginSecret(event.target.value)}
+                  placeholder="Nhập mật khẩu để đăng nhập"
+                  autoComplete="current-password"
+                />
+              </label>
+              {authError && <p className="login-error">{authError}</p>}
+              <button type="submit" disabled={isAuthenticating}>
+                {isAuthenticating ? 'Đang đăng nhập...' : 'Đăng nhập'}
+              </button>
+            </form>
+
+            <div className="login-divider" aria-hidden>
+              <span>Hoặc</span>
+            </div>
+
+            <form className="login-card login-card--secondary" onSubmit={handleCreateUser}>
+              <h2>Tạo tài khoản mới</h2>
+              <p className="login-helper">
+                Chưa có tài khoản? Tạo nhanh một tài khoản để kết nối cùng đội hỗ trợ.
+              </p>
+              {!isUserCreationOpen ? (
+                <button
+                  type="button"
+                  className="login-card__secondary-action"
+                  onClick={() => {
+                    setIsUserCreationOpen(true);
+                    setCreateUserError(null);
+                    setCreateUserSuccess(null);
+                  }}
+                >
+                  Bắt đầu tạo tài khoản
+                </button>
+              ) : (
+                <>
+                  <label>
+                    Tài khoản đăng nhập
+                    <input
+                      value={newUserId}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserId(event.target.value)}
+                      placeholder="Ví dụ: user:khachhang"
+                      autoComplete="username"
+                    />
+                  </label>
+                  <label>
+                    Tên hiển thị
+                    <input
+                      value={newUserName}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserName(event.target.value)}
+                      placeholder="Tên sẽ hiển thị với mọi người"
+                      autoComplete="name"
+                    />
+                  </label>
+                  <label>
+                    Mật khẩu
+                    <input
+                      type="password"
+                      value={newUserPassword}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserPassword(event.target.value)}
+                      placeholder="Đặt mật khẩu cho tài khoản"
+                      autoComplete="new-password"
+                    />
+                  </label>
+                  {createUserError && <p className="login-error">{createUserError}</p>}
+                  {createUserSuccess && <p className="login-success">{createUserSuccess}</p>}
+                  <div className="login-actions">
+                    <button
+                      type="button"
+                      className="login-card__secondary-action"
+                      onClick={() => {
+                        setIsUserCreationOpen(false);
+                        setCreateUserError(null);
+                        setCreateUserSuccess(null);
+                      }}
+                    >
+                      Hủy
+                    </button>
+                    <button type="submit" disabled={isCreatingUser}>
+                      {isCreatingUser ? 'Đang tạo...' : 'Tạo người dùng'}
+                    </button>
                   </div>
-                )}
-                isLoading={!userOptions.length}
-                noOptionsMessage={() => 'Chưa có người dùng khả dụng'}
-              />
-            </label>
-            <label>
-              Mật khẩu
-              <input
-                type="password"
-                value={loginSecret}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setLoginSecret(event.target.value)}
-                placeholder="Nhập mật khẩu người dùng"
-                autoComplete="current-password"
-              />
-            </label>
-            {authError && <p className="login-error">{authError}</p>}
-            <button type="submit" disabled={isAuthenticating}>
-              {isAuthenticating ? 'Đang đăng nhập...' : 'Đăng nhập'}
-            </button>
-          </form>
+                </>
+              )}
+            </form>
+          </div>
         </div>
       )}
     </div>
