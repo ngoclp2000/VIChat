@@ -50,6 +50,7 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
     const { tenantId } = request.params as { tenantId: string };
     const authHeader = request.headers.authorization;
     let authorized = false;
+    let canAssignRoles = false;
 
     if (authHeader?.startsWith('Bearer ')) {
       try {
@@ -61,6 +62,7 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
         }
 
         authorized = true;
+        canAssignRoles = true;
       } catch {
         return reply.status(401).send({ message: 'Invalid token' });
       }
@@ -90,7 +92,10 @@ export async function registerUserRoutes(app: FastifyInstance): Promise<void> {
     }
 
     try {
-      const created = await createTenantUser(app.mongo.db, tenantId, parsed);
+      const created = await createTenantUser(app.mongo.db, tenantId, {
+        ...parsed,
+        roles: canAssignRoles ? parsed.roles : undefined
+      });
       return reply.status(201).send(created);
     } catch (err) {
       const message = (err as Error).message;
