@@ -1,243 +1,281 @@
 import { type ChangeEvent, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Select, { type SingleValue, type StylesConfig } from 'react-select';
-import TextareaAutosize from 'react-textarea-autosize';
-import {
-  Lock,
-  LogOut,
-  Menu,
-  MessageCirclePlus,
-  Send,
-  ShieldCheck,
-  Smile,
-  Sparkles,
-  Trash2,
-  User,
-  Users,
-  X
-} from 'lucide-react';
+import { Theme } from '@radix-ui/themes';
+import type { StylesConfig } from 'react-select';
 import ChatKit from '@vichat/sdk';
 import type { ConversationDescriptor, MessagePayload, StickerPayload } from '@vichat/shared';
 import './App.css';
 
-const deviceInfo = { id: 'web-demo-device', platform: 'web' as const };
+import {
+  deviceInfo,
+  emojiPalette,
+  loginScopes,
+  stickerCatalog,
+  THEME_STORAGE_KEY
+} from './constants/app';
+import {
+  type AppTheme,
+  type ConversationView,
+  type LoginMode,
+  type TenantDirectorySummary,
+  type TenantOption,
+  type TenantSummary,
+  type TenantUserDirectoryEntry,
+  type TenantUserProfile,
+  type UserOption
+} from './types/app';
+import { readStoredSession, writeStoredSession } from './utils/session';
+import { messageToSnippet, sortConversations, truncate } from './utils/chat';
+import { ChatPanel } from './components/chat/ChatPanel';
+import { ConversationSidebar } from './components/sidebar/ConversationSidebar';
+import { CreateConversationDialog } from './components/dialogs/CreateConversationDialog';
+import { UserManagerDialog } from './components/dialogs/UserManagerDialog';
+import { LoginOverlay } from './components/auth/LoginOverlay';
+import { SuperAdminDialog } from './components/dialogs/SuperAdminDialog';
+import { TopBar } from './components/layout/TopBar';
 
-interface TenantUserProfile {
-  userId: string;
-  displayName: string;
-  roles: string[];
-  status: 'active' | 'disabled';
-  lastLoginAt?: string | null;
+interface SelectPalette {
+  surface: string;
+  border: string;
+  focusBorder: string;
+  focusShadow: string;
+  placeholder: string;
+  text: string;
+  menu: string;
+  menuShadow: string;
+  optionHover: string;
+  optionSelected: string;
+  optionText: string;
+  indicator: string;
+  indicatorHover: string;
+  multiBackground: string;
+  multiBorder: string;
+  multiText: string;
+  multiRemove: string;
+  multiRemoveHover: string;
+  input: string;
 }
 
-interface TenantUserDirectoryEntry {
-  userId: string;
-  displayName: string;
-}
-
-interface TenantSummary {
-  id: string;
-  name: string;
-  clientId: string;
-  apiKey: string;
-  plan: 'free' | 'pro' | 'enterprise';
-  limits: {
-    messagesPerMinute: number;
-    callsPerMinute: number;
-  };
-}
-
-interface TenantDirectorySummary {
-  id: string;
-  name: string;
-  clientId: string;
-}
-
-interface UserOption {
-  value: string;
-  label: string;
-  roles: string[];
-  status: 'active' | 'disabled';
-  lastLoginAt?: string | null;
-  [key: string]: unknown;
-}
-
-interface TenantOption {
-  value: string;
-  label: string;
-  clientId: string;
-}
-
-type ConversationView = ConversationDescriptor & {
-  unreadCount: number;
-  lastMessageSnippet?: string;
-  lastMessageAt?: string;
+const lightSelectPalette: SelectPalette = {
+  surface: 'rgba(255, 255, 255, 0.95)',
+  border: 'rgba(148, 163, 184, 0.45)',
+  focusBorder: 'rgba(59, 130, 246, 0.6)',
+  focusShadow: '0 0 0 2px rgba(59, 130, 246, 0.2)',
+  placeholder: 'rgba(71, 85, 105, 0.7)',
+  text: '#0f172a',
+  menu: 'rgba(255, 255, 255, 0.98)',
+  menuShadow: '0 18px 36px rgba(15, 23, 42, 0.15)',
+  optionHover: 'rgba(59, 130, 246, 0.15)',
+  optionSelected: 'rgba(59, 130, 246, 0.25)',
+  optionText: '#0f172a',
+  indicator: 'rgba(71, 85, 105, 0.65)',
+  indicatorHover: 'rgba(37, 99, 235, 0.9)',
+  multiBackground: 'linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(14, 165, 233, 0.12))',
+  multiBorder: 'rgba(59, 130, 246, 0.35)',
+  multiText: '#0f172a',
+  multiRemove: '#1d4ed8',
+  multiRemoveHover: '#ef4444',
+  input: '#0f172a'
 };
 
-const loginScopes = ['messages:write', 'presence:write'];
+const darkSelectPalette: SelectPalette = {
+  surface: 'rgba(15, 23, 42, 0.85)',
+  border: 'rgba(148, 163, 184, 0.25)',
+  focusBorder: 'rgba(59, 130, 246, 0.65)',
+  focusShadow: '0 0 0 2px rgba(59, 130, 246, 0.25)',
+  placeholder: 'rgba(226, 232, 240, 0.6)',
+  text: '#f8fafc',
+  menu: 'rgba(15, 23, 42, 0.95)',
+  menuShadow: '0 18px 36px rgba(15, 23, 42, 0.45)',
+  optionHover: 'rgba(59, 130, 246, 0.2)',
+  optionSelected: 'rgba(59, 130, 246, 0.35)',
+  optionText: '#f8fafc',
+  indicator: 'rgba(226, 232, 240, 0.75)',
+  indicatorHover: '#bae6fd',
+  multiBackground: 'linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(14, 165, 233, 0.25))',
+  multiBorder: 'rgba(14, 165, 233, 0.35)',
+  multiText: '#e0f2fe',
+  multiRemove: '#cbd5f5',
+  multiRemoveHover: '#fca5a5',
+  input: '#f8fafc'
+};
 
-const stickerCatalog: StickerPayload[] = [
-  {
-    id: 'sticker:thumbs_up',
-    name: 'Tuyệt vời',
-    url: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f44d.png'
-  },
-  {
-    id: 'sticker:rocket',
-    name: 'Tăng tốc',
-    url: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f680.png'
-  },
-  {
-    id: 'sticker:party',
-    name: 'Ăn mừng',
-    url: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/1f389.png'
-  },
-  {
-    id: 'sticker:coffee',
-    name: 'Cà phê',
-    url: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/2615.png'
-  }
-];
-
-const emojiPalette = [
-  '😀',
-  '😁',
-  '😂',
-  '🤣',
-  '😊',
-  '😍',
-  '🤩',
-  '🤔',
-  '🙌',
-  '👍',
-  '🙏',
-  '🎉',
-  '🚀',
-  '❤️',
-  '🔥',
-  '🥳',
-  '😎',
-  '🤖',
-  '💡',
-  '📞'
-];
-
-const SESSION_STORAGE_KEY = 'vichat.session';
-
-interface StoredSession {
-  token: string;
-  expiresAt: number;
-  tenant: {
-    id: string;
-    name: string;
-    clientId: string;
-  };
-  user: {
-    userId: string;
-    displayName: string;
-    roles: string[];
-  };
+function buildMultiSelectStyles<Option>(palette: SelectPalette): StylesConfig<Option, true> {
+  return {
+    control: (base, state) => ({
+      ...base,
+      borderRadius: '1rem',
+      backgroundColor: palette.surface,
+      borderColor: state.isFocused ? palette.focusBorder : palette.border,
+      boxShadow: state.isFocused ? palette.focusShadow : 'none',
+      minHeight: '3.25rem',
+      cursor: 'pointer'
+    }),
+    valueContainer: (base) => ({
+      ...base,
+      padding: '0.35rem 0.75rem',
+      gap: '0.4rem',
+      flexWrap: 'wrap',
+      alignItems: 'flex-start'
+    }),
+    placeholder: (base) => ({
+      ...base,
+      color: palette.placeholder,
+      fontWeight: 500
+    }),
+    multiValue: (base) => ({
+      ...base,
+      borderRadius: '999px',
+      background: palette.multiBackground,
+      border: `1px solid ${palette.multiBorder}`,
+      color: palette.multiText,
+      margin: '0.15rem'
+    }),
+    multiValueLabel: (base) => ({
+      ...base,
+      color: palette.multiText,
+      fontWeight: 600,
+      letterSpacing: '0.05em'
+    }),
+    multiValueRemove: (base) => ({
+      ...base,
+      color: palette.multiRemove,
+      ':hover': {
+        backgroundColor: 'transparent',
+        color: palette.multiRemoveHover
+      }
+    }),
+    menu: (base) => ({
+      ...base,
+      marginTop: '0.5rem',
+      backgroundColor: palette.menu,
+      borderRadius: '1rem',
+      overflow: 'hidden',
+      border: `1px solid ${palette.border}`,
+      boxShadow: palette.menuShadow
+    }),
+    option: (base, state) => ({
+      ...base,
+      backgroundColor: state.isSelected
+        ? palette.optionSelected
+        : state.isFocused
+        ? palette.optionHover
+        : 'transparent',
+      color: palette.optionText,
+      padding: '0.65rem 0.85rem'
+    }),
+    singleValue: (base) => ({
+      ...base,
+      color: palette.text,
+      fontWeight: 500
+    }),
+    input: (base) => ({
+      ...base,
+      color: palette.input
+    }),
+    indicatorsContainer: (base) => ({
+      ...base,
+      paddingRight: '0.75rem'
+    }),
+    dropdownIndicator: (base, state) => ({
+      ...base,
+      color: state.isFocused ? palette.indicatorHover : palette.indicator,
+      ':hover': {
+        color: palette.indicatorHover
+      }
+    }),
+    clearIndicator: (base, state) => ({
+      ...base,
+      color: state.isFocused ? palette.indicatorHover : palette.indicator,
+      ':hover': {
+        color: palette.indicatorHover
+      }
+    })
+  } as StylesConfig<Option, true>;
 }
 
-function readStoredSession(): StoredSession | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<StoredSession>;
-    if (
-      parsed &&
-      typeof parsed.token === 'string' &&
-      typeof parsed.expiresAt === 'number' &&
-      parsed.user &&
-      typeof parsed.user.userId === 'string' &&
-      typeof parsed.user.displayName === 'string' &&
-      Array.isArray(parsed.user.roles) &&
-      parsed.tenant &&
-      typeof parsed.tenant.id === 'string' &&
-      typeof parsed.tenant.name === 'string' &&
-      typeof parsed.tenant.clientId === 'string'
-    ) {
-      return {
-        token: parsed.token,
-        expiresAt: parsed.expiresAt,
-        tenant: {
-          id: parsed.tenant.id,
-          name: parsed.tenant.name,
-          clientId: parsed.tenant.clientId
-        },
-        user: {
-          userId: parsed.user.userId,
-          displayName: parsed.user.displayName,
-          roles: parsed.user.roles.filter((role): role is string => typeof role === 'string')
-        }
-      };
-    }
-  } catch (err) {
-    console.warn('Không thể đọc phiên lưu trữ', err);
-  }
-
-  window.localStorage.removeItem(SESSION_STORAGE_KEY);
-  return null;
-}
-
-function writeStoredSession(session: StoredSession | null): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  if (!session) {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
-    return;
-  }
-
-  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-}
-
-function sortConversations(list: ConversationView[]): ConversationView[] {
-  return list
-    .slice()
-    .sort((left, right) => {
-      const l = left.lastMessageAt ?? left.updatedAt ?? left.createdAt ?? '';
-      const r = right.lastMessageAt ?? right.updatedAt ?? right.createdAt ?? '';
-      return r.localeCompare(l);
-    });
-}
-
-function messageToSnippet(message: MessagePayload): string {
-  if (message.type === 'sticker' && message.sticker) {
-    return message.sticker.name ? `Nhãn dán: ${message.sticker.name}` : 'Đã gửi nhãn dán';
-  }
-
-  const ciphertext = message.body?.ciphertext ?? '';
-  return ciphertext || 'Tin nhắn mới';
-}
-
-function truncate(text: string, maxLength = 60): string {
-  if (text.length <= maxLength) {
-    return text;
-  }
-  return `${text.slice(0, maxLength - 1)}…`;
-}
-
-function getConversationInitials(conversation: ConversationDescriptor): string {
-  if (conversation.name) {
-    const parts = conversation.name.split(' ').filter(Boolean);
-    if (parts.length >= 2) {
-      return `${parts[0]?.[0] ?? ''}${parts[1]?.[0] ?? ''}`.toUpperCase();
-    }
-    return conversation.name.slice(0, 2).toUpperCase();
-  }
-
-  return conversation.id.slice(-2).toUpperCase();
+function buildSingleSelectStyles<Option>(palette: SelectPalette): StylesConfig<Option, false> {
+  return {
+    control: (base, state) => ({
+      ...base,
+      borderRadius: '0.9rem',
+      backgroundColor: palette.surface,
+      borderColor: state.isFocused ? palette.focusBorder : palette.border,
+      boxShadow: state.isFocused ? palette.focusShadow : 'none',
+      minHeight: '3rem',
+      cursor: 'pointer'
+    }),
+    valueContainer: (base) => ({
+      ...base,
+      padding: '0.25rem 0.75rem'
+    }),
+    placeholder: (base) => ({
+      ...base,
+      color: palette.placeholder,
+      fontWeight: 500
+    }),
+    singleValue: (base) => ({
+      ...base,
+      color: palette.text,
+      fontWeight: 600
+    }),
+    input: (base) => ({
+      ...base,
+      color: palette.input
+    }),
+    menu: (base) => ({
+      ...base,
+      marginTop: '0.5rem',
+      backgroundColor: palette.menu,
+      borderRadius: '0.9rem',
+      overflow: 'hidden',
+      border: `1px solid ${palette.border}`,
+      boxShadow: palette.menuShadow
+    }),
+    option: (base, state) => ({
+      ...base,
+      backgroundColor: state.isSelected
+        ? palette.optionSelected
+        : state.isFocused
+        ? palette.optionHover
+        : 'transparent',
+      color: palette.optionText,
+      padding: '0.55rem 0.85rem'
+    }),
+    dropdownIndicator: (base, state) => ({
+      ...base,
+      color: state.isFocused ? palette.indicatorHover : palette.indicator,
+      ':hover': {
+        color: palette.indicatorHover
+      }
+    }),
+    clearIndicator: (base, state) => ({
+      ...base,
+      color: state.isFocused ? palette.indicatorHover : palette.indicator,
+      ':hover': {
+        color: palette.indicatorHover
+      }
+    }),
+    indicatorSeparator: (base) => ({
+      ...base,
+      backgroundColor: palette.border
+    }),
+    noOptionsMessage: (base) => ({
+      ...base,
+      color: palette.placeholder,
+      fontWeight: 500
+    })
+  } as StylesConfig<Option, false>;
 }
 
 export default function App() {
+  const [theme, setTheme] = useState<AppTheme>(() => {
+    if (typeof window === 'undefined') {
+      return 'dark';
+    }
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return stored === 'light' ? 'light' : 'dark';
+  });
+  const selectPalette = useMemo<SelectPalette>(() => (theme === 'light' ? lightSelectPalette : darkSelectPalette), [theme]);
   const [chat, setChat] = useState<ChatKit | null>(null);
   const [accessToken, setAccessToken] = useState('');
   const [messages, setMessages] = useState<MessagePayload[]>([]);
@@ -260,7 +298,7 @@ export default function App() {
   const [showStickers, setShowStickers] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
-  const [loginMode, setLoginMode] = useState<'tenant' | 'superadmin'>('tenant');
+  const [loginMode, setLoginMode] = useState<LoginMode>('tenant');
   const [loginSecret, setLoginSecret] = useState('');
   const [selectedLoginUser, setSelectedLoginUser] = useState<UserOption | null>(null);
   const [sessionUser, setSessionUser] = useState<{ userId: string; displayName: string; roles: string[] } | null>(null);
@@ -307,6 +345,19 @@ export default function App() {
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const sendingMessageRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.body.dataset.theme = theme;
+    return () => {
+      document.body.removeAttribute('data-theme');
+    };
+  }, [theme]);
 
   useEffect(() => {
     const stored = readStoredSession();
@@ -363,6 +414,10 @@ export default function App() {
     writeStoredSession(null);
   }, []);
 
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  }, []);
+
   const handleLogout = useCallback(() => {
     resetSession(false);
   }, [resetSession]);
@@ -374,6 +429,15 @@ export default function App() {
     setNewUserPassword('');
     setCreateUserError(null);
     setCreateUserSuccess(null);
+  }, []);
+
+  const openUserManager = useCallback(() => {
+    setIsUserManagerOpen(true);
+    setCreateUserError(null);
+    setCreateUserSuccess(null);
+    setNewUserId('');
+    setNewUserName('');
+    setNewUserPassword('');
   }, []);
 
   const handleSuperAdminLogout = useCallback(() => {
@@ -880,93 +944,16 @@ export default function App() {
   );
 
   const sharedSelectStyles = useMemo(
-    () =>
-      ({
-        control: (base, state) => ({
-          ...base,
-          borderRadius: '1rem',
-          backgroundColor: 'rgba(15, 23, 42, 0.85)',
-          borderColor: state.isFocused ? 'rgba(59, 130, 246, 0.65)' : 'rgba(148, 163, 184, 0.25)',
-          boxShadow: state.isFocused ? '0 0 0 2px rgba(59, 130, 246, 0.25)' : 'none',
-          minHeight: '3.25rem',
-          cursor: 'pointer'
-        }),
-        valueContainer: (base) => ({
-          ...base,
-          padding: '0.35rem 0.75rem',
-          gap: '0.4rem',
-          flexWrap: 'wrap',
-          alignItems: 'flex-start'
-        }),
-        placeholder: (base) => ({
-          ...base,
-          color: 'rgba(226, 232, 240, 0.6)',
-          fontWeight: 500
-        }),
-        multiValue: (base) => ({
-          ...base,
-          borderRadius: '999px',
-          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(14, 165, 233, 0.25))',
-          color: '#e0f2fe',
-          border: '1px solid rgba(14, 165, 233, 0.35)',
-          margin: '0.15rem'
-        }),
-        multiValueLabel: (base) => ({
-          ...base,
-          color: '#e0f2fe',
-          fontWeight: 600,
-          letterSpacing: '0.05em'
-        }),
-        multiValueRemove: (base) => ({
-          ...base,
-          color: '#cbd5f5',
-          ':hover': {
-            backgroundColor: 'transparent',
-            color: '#fca5a5'
-          }
-        }),
-        menu: (base) => ({
-          ...base,
-          marginTop: '0.5rem',
-          backgroundColor: 'rgba(15, 23, 42, 0.95)',
-          borderRadius: '1rem',
-          overflow: 'hidden',
-          border: '1px solid rgba(148, 163, 184, 0.25)',
-          boxShadow: '0 18px 36px rgba(15, 23, 42, 0.45)',
-          backdropFilter: 'blur(12px)'
-        }),
-        option: (base, state) => ({
-          ...base,
-          backgroundColor: state.isSelected
-            ? 'rgba(59, 130, 246, 0.35)'
-            : state.isFocused
-            ? 'rgba(59, 130, 246, 0.2)'
-            : 'transparent',
-          color: '#f8fafc',
-          padding: '0.65rem 0.85rem'
-        }),
-        singleValue: (base) => ({
-          ...base,
-          color: '#f8fafc',
-          fontWeight: 500
-        }),
-        input: (base) => ({
-          ...base,
-          color: '#f8fafc'
-        }),
-        indicatorsContainer: (base) => ({
-          ...base,
-          paddingRight: '0.75rem'
-        }),
-        dropdownIndicator: (base, state) => ({
-          ...base,
-          color: state.isFocused ? '#bae6fd' : 'rgba(226, 232, 240, 0.75)',
-          ':hover': {
-            color: '#bae6fd'
-          }
-        })
-      }) as StylesConfig<UserOption, true>,
-    []
+    () => buildMultiSelectStyles<UserOption>(selectPalette),
+    [selectPalette]
+  );
+  const tenantSelectStyles = useMemo(
+    () => buildSingleSelectStyles<TenantOption>(selectPalette),
+    [selectPalette]
+  );
+  const userSelectStyles = useMemo(
+    () => buildSingleSelectStyles<UserOption>(selectPalette),
+    [selectPalette]
   );
 
   const createConversationType: 'dm' | 'group' = selectedMemberOptions.length > 1 ? 'group' : 'dm';
@@ -1396,6 +1383,38 @@ export default function App() {
 
   const toggleSidebar = () => setSidebarOpen((value) => !value);
 
+  const handleSelectConversation = useCallback((conversationId: string) => {
+    setSelectedConversationId(conversationId);
+    setSidebarOpen(false);
+  }, []);
+
+  const handleToggleEmoji = useCallback(() => {
+    if (!chat || !selectedConversation || !isAuthenticated) return;
+    setShowStickers(false);
+    setShowEmojiPicker((value) => !value);
+  }, [chat, selectedConversation, isAuthenticated]);
+
+  const handleToggleStickers = useCallback(() => {
+    if (!chat || !selectedConversation || !isAuthenticated) return;
+    setShowEmojiPicker(false);
+    setShowStickers((value) => !value);
+  }, [chat, selectedConversation, isAuthenticated]);
+
+  const handleClosePickers = useCallback(() => {
+    setShowEmojiPicker(false);
+    setShowStickers(false);
+  }, []);
+
+  const handleGroupNameChange = useCallback((value: string, isDirty: boolean) => {
+    setIsGroupNameDirty(isDirty);
+    setNewConversationName(value);
+  }, []);
+
+  const refreshSuperAdminTenants = useCallback(() => {
+    if (!superAdminToken) return;
+    void fetchSuperAdminTenants(superAdminToken);
+  }, [fetchSuperAdminTenants, superAdminToken]);
+
   const formatTime = (iso?: string) => {
     if (!iso) return '';
     return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1464,21 +1483,6 @@ export default function App() {
       setError('Không thể tạo cuộc trò chuyện mới. Kiểm tra kết nối backend.');
     }
   };
-
-  const handleInsertEmoji = useCallback(
-    (emoji: string) => {
-      setDraft((prev) => `${prev}${emoji}`);
-      setShowEmojiPicker(false);
-      if (typeof window !== 'undefined') {
-        window.requestAnimationFrame(() => {
-          composerInputRef.current?.focus();
-        });
-      } else {
-        composerInputRef.current?.focus();
-      }
-    },
-    [composerInputRef]
-  );
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1690,107 +1694,36 @@ export default function App() {
   const createConversationLabel = createConversationType === 'group' ? 'Nhóm' : 'Trò chuyện 1-1';
 
   const canSendMessage = Boolean(draft.trim() && selectedConversation && isAuthenticated);
+  const appClassName = useMemo(() => `app${theme === 'light' ? ' app--light' : ''}`, [theme]);
+  const layoutClassName = useMemo(
+    () => `layout${sidebarOpen ? ' layout--sidebar-open' : ''}`,
+    [sidebarOpen]
+  );
+  const loginOverlayVisible = !isAuthenticated && !isSuperAdminOpen;
 
   return (
-    <div className="app">
-      <div className="top-bar">
-        <button
-          type="button"
-          className="sidebar-toggle"
-          onClick={toggleSidebar}
-          aria-label="Mở danh sách cuộc trò chuyện"
-        >
-          <Menu size={20} aria-hidden />
-        </button>
-        <div className="top-meta">
-          <h1>VIChat</h1>
-          <span className={`status status-${status}`}>{status}</span>
-        </div>
-        <div className="user-pill">
-          <span className="avatar" aria-hidden>
-            <ShieldCheck size={20} />
-          </span>
-          <span className="user-details">
-            <strong>{sessionUser?.displayName ?? 'Chưa đăng nhập'}</strong>
-            <small>{sessionUser ? sessionUser.userId : 'Chọn người dùng để bắt đầu'}</small>
-          </span>
-          {isAuthenticated && (
-            <button type="button" className="logout-button" onClick={handleLogout}>
-              <LogOut size={16} aria-hidden />
-              <span>Đăng xuất</span>
-            </button>
-          )}
-        </div>
-      </div>
+    <Theme appearance={theme} accentColor="sky" grayColor="slate" radius="large">
+      <div className={appClassName} data-theme={theme}>
+      <TopBar
+        status={status}
+        onToggleSidebar={toggleSidebar}
+        isAuthenticated={isAuthenticated}
+        sessionUser={sessionUser}
+        onLogout={handleLogout}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+      />
 
-      <div className={`layout ${sidebarOpen ? 'layout--sidebar-open' : ''}`}>
-        <aside className="sidebar">
-          <header className="sidebar-header">
-            <h2>Cuộc trò chuyện</h2>
-            <span className="hint">Multi-tenant demo</span>
-          </header>
-          <ul className="conversation-list">
-            {conversations.map((conversation) => {
-              const active = conversation.id === selectedConversationId;
-              return (
-                <li
-                  key={conversation.id}
-                  className={`conversation ${active ? 'active' : ''}`}
-                  onClick={() => {
-                    setSelectedConversationId(conversation.id);
-                    setSidebarOpen(false);
-                  }}
-                >
-                  <div className="conversation-avatar" aria-hidden>
-                    <span>{getConversationInitials(conversation)}</span>
-                  </div>
-                  <div className="conversation-body">
-                    <div className="conversation-title">{conversation.name ?? conversation.id}</div>
-                    <div className="conversation-snippet">
-                      {conversation.lastMessageSnippet ?? (conversation.type === 'group' ? 'Nhóm' : '1 vs 1')}
-                    </div>
-                  </div>
-                  {conversation.unreadCount > 0 && (
-                    <span className="conversation-unread">{conversation.unreadCount > 99 ? '99+' : conversation.unreadCount}</span>
-                  )}
-                </li>
-              );
-            })}
-            {!conversations.length && <li className="conversation-empty">Chưa có cuộc trò chuyện nào.</li>}
-          </ul>
-
-          <div className="sidebar-actions">
-            <button
-              type="button"
-              className="new-conversation-button"
-              onClick={() => setIsCreateDialogOpen(true)}
-              disabled={!isAuthenticated}
-            >
-              <MessageCirclePlus size={18} aria-hidden />
-              <span>Tạo cuộc trò chuyện</span>
-            </button>
-            {isAuthenticated && isAdmin && (
-              <button
-                type="button"
-                className="manage-users-button"
-                onClick={() => {
-                  setIsUserManagerOpen(true);
-                  setCreateUserError(null);
-                  setCreateUserSuccess(null);
-                  setNewUserId('');
-                  setNewUserName('');
-                  setNewUserPassword('');
-                }}
-              >
-                <ShieldCheck size={18} aria-hidden />
-                <span>Quản lý người dùng</span>
-              </button>
-            )}
-            {!isAuthenticated && (
-              <small className="sidebar-hint">Đăng nhập để bắt đầu cuộc trò chuyện mới.</small>
-            )}
-          </div>
-        </aside>
+      <div className={layoutClassName}>
+        <ConversationSidebar
+          conversations={conversations}
+          selectedConversationId={selectedConversationId}
+          onSelectConversation={handleSelectConversation}
+          onCreateConversation={() => setIsCreateDialogOpen(true)}
+          onOpenUserManager={openUserManager}
+          isAuthenticated={isAuthenticated}
+          isAdmin={isAdmin}
+        />
         {sidebarOpen && (
           <button
             type="button"
@@ -1800,733 +1733,143 @@ export default function App() {
           />
         )}
 
-        <main className="chat-panel">
-          <header className="chat-header">
-            <div className="chat-contact">
-              <div className="chat-avatar" aria-hidden>
-                <span>{selectedConversation ? getConversationInitials(selectedConversation) : 'VC'}</span>
-              </div>
-              <div>
-                <h2>{currentConversationLabel}</h2>
-                <p>{currentConversationMeta}</p>
-              </div>
-            </div>
-            <div className="chat-meta">
-              <span className="badge">
-                Tenant: {activeTenant ? `${activeTenant.label} (${activeTenant.value})` : 'Chưa chọn'}
-              </span>
-              {selectedConversation && <span className="badge">Conv: {selectedConversation.id}</span>}
-            </div>
-          </header>
-
-          <section className="message-list" aria-live="polite">
-            {error && <div className="connection-error">{error}</div>}
-            {isLoadingMessages && !error && <div className="message-loading">Đang tải tin nhắn...</div>}
-            {!messages.length && !error && !isLoadingMessages && (
-              <div className="empty-state">
-                <h3>Chưa có tin nhắn</h3>
-                <p>Tạo tin nhắn đầu tiên của bạn trong cuộc trò chuyện này.</p>
-              </div>
-            )}
-            {messages.map((message) => {
-              const isMine = sessionUser?.userId === message.senderId;
-              const ciphertext = message.body?.ciphertext ?? '';
-              const isSticker = message.type === 'sticker' && message.sticker;
-              const bubbleClass = `bubble ${isMine ? 'bubble--out' : 'bubble--in'}${isSticker ? ' bubble--sticker' : ''}`;
-              return (
-                <article key={message.id} className={bubbleClass}>
-                  <header>
-                    <span className="bubble-author">{isMine ? 'Bạn' : message.senderId}</span>
-                    <time>{formatTime(message.sentAt)}</time>
-                  </header>
-                  {isSticker && message.sticker ? (
-                    <div className="sticker-message">
-                      <img src={message.sticker.url} alt={message.sticker.name ?? message.sticker.id} />
-                      {message.sticker.name && <span>{message.sticker.name}</span>}
-                    </div>
-                  ) : (
-                    <p>{ciphertext || 'Tin nhắn trống'}</p>
-                  )}
-                </article>
-              );
-            })}
-            <div ref={messageEndRef} />
-          </section>
-
-          <form className="composer" onSubmit={handleSubmit}>
-            <div className="composer-meta">
-              <span className="lock" aria-hidden>
-                <Lock size={16} />
-              </span>
-              <span>Tin nhắn của bạn được mã hóa đầu cuối. Nhập nội dung và nhấn Enter để gửi ngay.</span>
-            </div>
-            <div className="composer-inputs">
-              <TextareaAutosize
-                className="composer-textarea"
-                placeholder="Nhập tin nhắn của bạn..."
-                value={draft}
-                onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setDraft(event.target.value)}
-                minRows={2}
-                maxRows={6}
-                disabled={!chat || !selectedConversation || !isAuthenticated}
-                ref={composerInputRef}
-                onFocus={() => {
-                  setShowEmojiPicker(false);
-                  setShowStickers(false);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    void sendMessage();
-                  }
-                }}
-              />
-              <div className="composer-actions">
-                <div className="composer-quick">
-                  <button
-                    type="button"
-                    className={`composer-action ${showEmojiPicker ? 'composer-action--active' : ''}`}
-                    onClick={() => {
-                      if (!chat || !selectedConversation || !isAuthenticated) return;
-                      setShowStickers(false);
-                      setShowEmojiPicker((value) => !value);
-                    }}
-                    aria-label="Chèn emoji"
-                    aria-expanded={showEmojiPicker}
-                    disabled={!chat || !selectedConversation || !isAuthenticated}
-                  >
-                    <Smile size={18} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    className={`composer-action sticker-button ${showStickers ? 'sticker-button--active' : ''}`}
-                    onClick={() => {
-                      if (!chat || !selectedConversation || !isAuthenticated) return;
-                      setShowEmojiPicker(false);
-                      setShowStickers((value) => !value);
-                    }}
-                    aria-label="Chèn nhãn dán"
-                    aria-expanded={showStickers}
-                    disabled={!chat || !selectedConversation || !isAuthenticated}
-                  >
-                    <Sparkles size={18} aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    className="composer-action composer-action--clear"
-                    onClick={() => setDraft('')}
-                    disabled={!draft}
-                    aria-label="Xóa nội dung đang nhập"
-                  >
-                    <Trash2 size={18} aria-hidden />
-                  </button>
-                </div>
-                <button
-                  type="submit"
-                  className="composer-send"
-                  disabled={!canSendMessage}
-                >
-                  <Send size={18} aria-hidden />
-                  <span>Gửi</span>
-                </button>
-              </div>
-            </div>
-            {showEmojiPicker && chat && selectedConversation && isAuthenticated && (
-              <div className="emoji-panel" role="listbox" aria-label="Chọn emoji">
-                {emojiPalette.map((emoji) => (
-                  <button
-                    key={emoji}
-                    type="button"
-                    className="emoji-option"
-                    onClick={() => handleInsertEmoji(emoji)}
-                  >
-                    <span aria-hidden>{emoji}</span>
-                    <span className="sr-only">Thêm emoji {emoji}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {showStickers && chat && selectedConversation && isAuthenticated && (
-              <div className="sticker-panel" role="menu">
-                {stickerCatalog.map((sticker) => (
-                  <button
-                    type="button"
-                    key={sticker.id}
-                    className="sticker-option"
-                    onClick={() => handleSendSticker(sticker)}
-                    disabled={!isAuthenticated}
-                  >
-                    <img src={sticker.url} alt={sticker.name ?? sticker.id} />
-                    <span>{sticker.name ?? sticker.id}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </form>
-        </main>
+        <ChatPanel
+          selectedConversation={selectedConversation}
+          currentConversationLabel={currentConversationLabel}
+          currentConversationMeta={currentConversationMeta}
+          activeTenant={activeTenant}
+          error={error}
+          isLoadingMessages={isLoadingMessages}
+          messages={messages}
+          sessionUser={sessionUser}
+          messageEndRef={messageEndRef}
+          composerInputRef={composerInputRef}
+          draft={draft}
+          onDraftChange={setDraft}
+          onSubmit={handleSubmit}
+          onSendMessage={sendMessage}
+          canSendMessage={canSendMessage}
+          isAuthenticated={isAuthenticated}
+          chatReady={Boolean(chat)}
+          showStickers={showStickers}
+          showEmojiPicker={showEmojiPicker}
+          onToggleStickers={handleToggleStickers}
+          onToggleEmoji={handleToggleEmoji}
+          onClosePickers={handleClosePickers}
+          onSendSticker={handleSendSticker}
+          stickers={stickerCatalog}
+          emojiPalette={emojiPalette}
+        />
       </div>
 
-      {isCreateDialogOpen && (
-        <div
-          className="create-dialog"
-          role="dialog"
-          aria-modal="true"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setIsCreateDialogOpen(false);
-            }
-          }}
-        >
-          <form className="create-card" onSubmit={handleCreateConversation}>
-            <header className="create-card__header">
-              <div className="create-card__title">
-                <MessageCirclePlus size={20} aria-hidden />
-                <div>
-                  <h3>Cuộc trò chuyện mới</h3>
-                  <p>Chọn người nhận để bắt đầu kết nối.</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="create-card__close"
-                onClick={() => setIsCreateDialogOpen(false)}
-                aria-label="Đóng tạo cuộc trò chuyện"
-              >
-                <X size={16} aria-hidden />
-              </button>
-            </header>
+      <CreateConversationDialog
+        isOpen={isCreateDialogOpen}
+        memberOptions={memberOptions}
+        selectedMemberOptions={selectedMemberOptions}
+        onMembersChange={(options) => setSelectedMemberOptions(options)}
+        onClose={() => setIsCreateDialogOpen(false)}
+        onSubmit={handleCreateConversation}
+        createConversationType={createConversationType}
+        conversationPreviewName={conversationPreviewName}
+        newConversationName={newConversationName}
+        onGroupNameChange={handleGroupNameChange}
+        creationError={creationError}
+        canSubmitConversation={canSubmitConversation}
+        createConversationLabel={createConversationLabel}
+        sharedSelectStyles={sharedSelectStyles}
+      />
 
-            <div className="create-card__summary">
-              <span className="summary-pill">
-                <Users size={16} aria-hidden />
-                {selectedMemberOptions.length ? `${selectedMemberOptions.length} thành viên` : 'Chưa chọn'}
-              </span>
-              <span className={`summary-type summary-type--${createConversationType}`}>
-                {createConversationType === 'group' ? (
-                  <Users size={16} aria-hidden />
-                ) : (
-                  <User size={16} aria-hidden />
-                )}
-                {createConversationLabel}
-              </span>
-            </div>
-            <p className="create-card__hint">
-              Hãy chọn người bạn muốn trò chuyện. Chọn một người để bắt đầu cuộc trò chuyện riêng hoặc nhiều người để lập nhóm và đặt tên bên dưới.
-            </p>
+      <UserManagerDialog
+        isOpen={isUserManagerOpen}
+        tenantUsers={tenantUsers}
+        newUserId={newUserId}
+        newUserName={newUserName}
+        newUserPassword={newUserPassword}
+        onUserIdChange={setNewUserId}
+        onUserNameChange={setNewUserName}
+        onUserPasswordChange={setNewUserPassword}
+        onSubmit={handleCreateUser}
+        onClose={closeUserManager}
+        isCreatingUser={isCreatingUser}
+        createUserError={createUserError}
+        createUserSuccess={createUserSuccess}
+      />
 
-            <label className="create-card__field">
-              <span>Thành viên</span>
-              <Select<UserOption, true>
-                classNamePrefix="rs"
-                styles={sharedSelectStyles}
-                options={memberOptions}
-                value={selectedMemberOptions}
-                onChange={(value) => setSelectedMemberOptions(Array.isArray(value) ? value : [])}
-                placeholder="Tìm kiếm và chọn thành viên..."
-                isMulti
-                isSearchable
-                isClearable
-                closeMenuOnSelect={false}
-                noOptionsMessage={() => 'Không tìm thấy thành viên phù hợp'}
-                formatOptionLabel={(option: UserOption) => (
-                  <span className="user-option__name-only">{option.label}</span>
-                )}
-                isDisabled={!memberOptions.length}
-              />
-            </label>
-
-            {createConversationType === 'group' && (
-              <label className="create-card__field">
-                <span>Tên nhóm</span>
-                <input
-                  type="text"
-                  value={newConversationName}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                    const { value } = event.target;
-                    setIsGroupNameDirty(Boolean(value.trim().length));
-                    setNewConversationName(value);
-                  }}
-                  placeholder={conversationPreviewName || 'Tên nhóm'}
-                />
-              </label>
-            )}
-
-            {creationError && <p className="create-card__error">{creationError}</p>}
-
-            <div className="create-card__actions">
-              <button type="button" className="create-card__cancel" onClick={() => setIsCreateDialogOpen(false)}>
-                Hủy
-              </button>
-              <button type="submit" disabled={!canSubmitConversation}>
-                Bắt đầu trò chuyện
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {isUserManagerOpen && (
-        <div
-          className="create-dialog"
-          role="dialog"
-          aria-modal="true"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              closeUserManager();
-            }
-          }}
-        >
-          <form className="create-card create-card--manager" onSubmit={handleCreateUser}>
-            <header className="create-card__header">
-              <div className="create-card__title">
-                <ShieldCheck size={20} aria-hidden />
-                <div>
-                  <h3>Quản lý người dùng</h3>
-                  <p>Thêm hoặc xem nhanh danh sách thành viên của tenant.</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="create-card__close"
-                onClick={closeUserManager}
-                aria-label="Đóng quản lý người dùng"
-              >
-                <X size={16} aria-hidden />
-              </button>
-            </header>
-
-            <div className="user-manager__content">
-              <section className="user-manager__section">
-                <h4>Thành viên hiện có</h4>
-                <ul className="user-manager__list">
-                  {tenantUsers.length ? (
-                    tenantUsers.map((user) => (
-                      <li key={user.userId}>
-                        <strong>{user.displayName}</strong>
-                        <span>{user.userId}</span>
-                        <small>{user.roles.length ? user.roles.join(', ') : 'member'}</small>
-                      </li>
-                    ))
-                  ) : (
-                    <li className="user-manager__empty">Chưa có người dùng nào trong tenant.</li>
-                  )}
-                </ul>
-              </section>
-
-              <section className="user-manager__section">
-                <h4>Thêm người dùng mới</h4>
-                <label>
-                  Tài khoản đăng nhập
-                  <input
-                    value={newUserId}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserId(event.target.value)}
-                    placeholder="Ví dụ: user:khachhang"
-                    autoComplete="username"
-                  />
-                </label>
-                <label>
-                  Tên hiển thị
-                  <input
-                    value={newUserName}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserName(event.target.value)}
-                    placeholder="Tên sẽ hiển thị với mọi người"
-                    autoComplete="name"
-                  />
-                </label>
-                <label>
-                  Mật khẩu
-                  <input
-                    type="password"
-                    value={newUserPassword}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) => setNewUserPassword(event.target.value)}
-                    placeholder="Đặt mật khẩu cho tài khoản"
-                    autoComplete="new-password"
-                  />
-                </label>
-                {createUserError && <p className="create-card__error">{createUserError}</p>}
-                {createUserSuccess && <p className="create-card__success">{createUserSuccess}</p>}
-              </section>
-            </div>
-
-            <div className="create-card__actions">
-              <button type="button" className="create-card__cancel" onClick={closeUserManager}>
-                Đóng
-              </button>
-              <button type="submit" disabled={isCreatingUser}>
-                {isCreatingUser ? 'Đang tạo...' : 'Tạo người dùng'}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {!isAuthenticated && !isSuperAdminOpen && (
-        <div className="login-overlay" role="dialog" aria-modal="true">
-          <div className="login-dialog">
-            <div className="login-card">
-              <div className="login-toggle" role="tablist" aria-label="Chọn phương thức đăng nhập">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={loginMode === 'tenant'}
-                  className={loginMode === 'tenant' ? 'login-toggle__button login-toggle__button--active' : 'login-toggle__button'}
-                  onClick={() => setLoginMode('tenant')}
-                >
-                  Người dùng tenant
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={loginMode === 'superadmin'}
-                  className={
-                    loginMode === 'superadmin'
-                      ? 'login-toggle__button login-toggle__button--active'
-                      : 'login-toggle__button'
-                  }
-                  onClick={() => setLoginMode('superadmin')}
-                >
-                  Superadmin
-                </button>
-              </div>
-
-              {loginMode === 'tenant' ? (
-                <form className="login-card__form" onSubmit={handleLogin}>
-                  <h2>Đăng nhập vào VIChat</h2>
-                  <p className="login-helper">Chọn tài khoản sẵn có và nhập mật khẩu để bắt đầu trò chuyện.</p>
-                  <label>
-                    Đơn vị
-                    <Select<TenantOption>
-                      classNamePrefix="rs"
-                      styles={sharedSelectStyles as StylesConfig<TenantOption, false>}
-                      options={tenantOptions}
-                      value={selectedLoginTenant}
-                      onChange={(option) =>
-                        setSelectedLoginTenant((option as SingleValue<TenantOption>) ?? null)
-                      }
-                      placeholder="Chọn đơn vị của bạn"
-                      isLoading={isLoadingTenants}
-                      noOptionsMessage={() => 'Chưa có đơn vị khả dụng'}
-                    />
-                  </label>
-                  <label>
-                    Tài khoản
-                    <Select<UserOption>
-                      classNamePrefix="rs"
-                      styles={sharedSelectStyles as StylesConfig<UserOption, false>}
-                      options={userOptions}
-                      value={selectedLoginUser}
-                      onChange={(option) => setSelectedLoginUser((option as SingleValue<UserOption>) ?? null)}
-                      placeholder="Chọn tài khoản của bạn"
-                      formatOptionLabel={(option: UserOption) => (
-                        <span className="user-option__name-only">{option.label}</span>
-                      )}
-                      isLoading={isLoadingTenantDirectory}
-                      isDisabled={!selectedLoginTenant || isLoadingTenantDirectory}
-                      noOptionsMessage={() => 'Chưa có người dùng khả dụng'}
-                    />
-                  </label>
-                  {tenantDirectoryError && <p className="login-error">{tenantDirectoryError}</p>}
-                  <label>
-                    Mật khẩu
-                    <input
-                      type="password"
-                      value={loginSecret}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => setLoginSecret(event.target.value)}
-                      placeholder="Nhập mật khẩu để đăng nhập"
-                      autoComplete="current-password"
-                    />
-                  </label>
-                  {authError && <p className="login-error">{authError}</p>}
-                  <button
-                    type="submit"
-                    disabled={isAuthenticating || isLoadingTenants || !selectedLoginTenant}
-                  >
-                    {isAuthenticating ? 'Đang đăng nhập...' : 'Đăng nhập'}
-                  </button>
-                </form>
-              ) : (
-                <form className="login-card__form" onSubmit={handleSuperAdminLogin}>
-                  <h2>Đăng nhập Superadmin</h2>
-                  <p className="login-helper login-helper--left">
-                    Superadmin dùng để cấu hình tenant và tạo quản trị viên đầu tiên cho từng đơn vị.
-                  </p>
-                  <label>
-                    Tài khoản superadmin
-                    <input
-                      value={superAdminUsername}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminUsername(event.target.value)}
-                      placeholder="Ví dụ: superadmin"
-                      autoComplete="username"
-                      disabled={isSuperAdminEnabled !== true}
-                    />
-                  </label>
-                  <label>
-                    Mật khẩu
-                    <input
-                      type="password"
-                      value={superAdminPassword}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminPassword(event.target.value)}
-                      placeholder="Nhập mật khẩu superadmin"
-                      autoComplete="current-password"
-                      disabled={isSuperAdminEnabled !== true}
-                    />
-                  </label>
-                  <small className="login-hint">{superAdminStatusMessage}</small>
-                  {superAdminError && <p className="login-error">{superAdminError}</p>}
-                  <div className="login-actions">
-                    <button
-                      type="submit"
-                      disabled={isAuthenticatingSuperAdmin || isSuperAdminEnabled !== true}
-                    >
-                      {isAuthenticatingSuperAdmin
-                        ? 'Đang đăng nhập...'
-                        : superAdminToken
-                        ? 'Đăng nhập lại'
-                        : 'Đăng nhập'}
-                    </button>
-                    <button
-                      type="button"
-                      className="login-card__secondary-action"
-                      onClick={() => setIsSuperAdminOpen(true)}
-                      disabled={!superAdminToken}
-                    >
-                      Mở bảng điều khiển
-                    </button>
-                  </div>
-                  {superAdminToken && (
-                    <p className="login-success">
-                      Đã đăng nhập superadmin, bạn có thể mở bảng điều khiển để quản lý tenant.
-                    </p>
-                  )}
-                </form>
-              )}
-            </div>
-
-            <div className="login-divider" aria-hidden>
-              <span>Quản trị</span>
-            </div>
-
-            <div className="login-card login-card--secondary login-card--info">
-              <h2>Quản lý người dùng</h2>
-              <p className="login-helper">
-                Sau khi đăng nhập superadmin, bạn có thể thêm tenant và người dùng đầu tiên cho từng đơn vị.
-              </p>
-              <button
-                type="button"
-                className="login-card__secondary-action"
-                onClick={() => setIsSuperAdminOpen(true)}
-              >
-                Mở màn hình Superadmin
-              </button>
-              <small className="login-hint">
-                {superAdminToken
-                  ? 'Đang đăng nhập superadmin. Mở màn hình để quản lý tenant ngay.'
-                  : 'Đăng nhập bằng tài khoản superadmin để kích hoạt bảng điều khiển quản trị.'}
-              </small>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isSuperAdminOpen && (
-        <div
-          className="create-dialog"
-          role="dialog"
-          aria-modal="true"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              closeSuperAdmin();
-            }
-          }}
-        >
-          <div className="superadmin-card">
-            <header className="create-card__header">
-              <div className="create-card__title">
-                <ShieldCheck size={20} aria-hidden />
-                <div>
-                  <h3>Superadmin</h3>
-                  <p>Quản lý tenant và tạo quản trị viên đầu tiên.</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                className="create-card__close"
-                onClick={closeSuperAdmin}
-                aria-label="Đóng màn hình superadmin"
-              >
-                <X size={16} aria-hidden />
-              </button>
-            </header>
-
-            <section className="superadmin-section">
-              <h4>Đăng nhập superadmin</h4>
-              <form className="superadmin-form" onSubmit={handleSuperAdminLogin}>
-                <label>
-                  Tài khoản
-                  <input
-                    value={superAdminUsername}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminUsername(event.target.value)}
-                    placeholder="Ví dụ: superadmin"
-                    autoComplete="username"
-                    disabled={isSuperAdminEnabled !== true}
-                  />
-                </label>
-                <label>
-                  Mật khẩu
-                  <input
-                    type="password"
-                    value={superAdminPassword}
-                    onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminPassword(event.target.value)}
-                    placeholder="Nhập mật khẩu superadmin"
-                    autoComplete="current-password"
-                    disabled={isSuperAdminEnabled !== true}
-                  />
-                </label>
-                <div className="superadmin-actions">
-                  <button
-                    type="submit"
-                    disabled={isAuthenticatingSuperAdmin || isSuperAdminEnabled !== true}
-                  >
-                    {isAuthenticatingSuperAdmin
-                      ? 'Đang đăng nhập...'
-                      : superAdminToken
-                      ? 'Đăng nhập lại'
-                      : 'Đăng nhập'}
-                  </button>
-                  {superAdminToken && (
-                    <>
-                      <button
-                        type="button"
-                        className="superadmin-actions__secondary"
-                        onClick={() => void fetchSuperAdminTenants(superAdminToken)}
-                        disabled={
-                          isLoadingSuperAdmin || isAuthenticatingSuperAdmin || isSuperAdminEnabled !== true
-                        }
-                      >
-                        {isLoadingSuperAdmin ? 'Đang tải...' : 'Tải danh sách tenant'}
-                      </button>
-                      <button
-                        type="button"
-                        className="superadmin-actions__secondary"
-                        onClick={handleSuperAdminLogout}
-                      >
-                        Đăng xuất
-                      </button>
-                    </>
-                  )}
-                </div>
-                <small className="superadmin-hint">{superAdminStatusMessage}</small>
-              </form>
-              {superAdminToken && (
-                <p className="superadmin-hint superadmin-hint--success">Đã đăng nhập superadmin, bạn có thể quản lý tenant.</p>
-              )}
-              {superAdminError && <p className="create-card__error">{superAdminError}</p>}
-            </section>
-
-            <section className="superadmin-section">
-              <h4>Tenant hiện có</h4>
-              <ul className="superadmin-tenant-list">
-                {superAdminToken ? (
-                  superAdminTenants.length ? (
-                    superAdminTenants.map((tenant) => (
-                      <li key={tenant.id}>
-                        <div>
-                          <strong>{tenant.name}</strong>
-                          <small>ID: {tenant.id}</small>
-                        </div>
-                        <span className="badge">Plan: {tenant.plan}</span>
-                      </li>
-                    ))
-                  ) : (
-                    <li className="superadmin-tenant-empty">Chưa có tenant nào hoặc thiếu quyền truy cập.</li>
-                  )
-                ) : (
-                  <li className="superadmin-tenant-empty">Đăng nhập superadmin để xem danh sách tenant.</li>
-                )}
-              </ul>
-            </section>
-
-            <section className="superadmin-section">
-              <h4>Thêm tenant mới</h4>
-              <form className="superadmin-form" onSubmit={handleCreateTenant}>
-                <label>
-                  Tenant ID
-                  <input value={newTenantId} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantId(event.target.value)} placeholder="Ví dụ: tenant-ban-hang" />
-                </label>
-                <label>
-                  Tên hiển thị
-                  <input value={newTenantName} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantName(event.target.value)} placeholder="Tên hiển thị cho tenant" />
-                </label>
-                <label>
-                  Client ID
-                  <input value={newTenantClientId} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantClientId(event.target.value)} placeholder="Ví dụ: app-ban-hang" />
-                </label>
-                <label>
-                  API key
-                  <input value={newTenantApiKey} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantApiKey(event.target.value)} placeholder="Khóa API cho client" />
-                </label>
-                <label>
-                  Gói dịch vụ
-                  <select value={newTenantPlan} onChange={(event) => setNewTenantPlan(event.target.value as 'free' | 'pro' | 'enterprise')}>
-                    <option value="free">Free</option>
-                    <option value="pro">Pro</option>
-                    <option value="enterprise">Enterprise</option>
-                  </select>
-                </label>
-                {createTenantError && <p className="create-card__error">{createTenantError}</p>}
-                {createTenantSuccess && <p className="create-card__success">{createTenantSuccess}</p>}
-                <div className="superadmin-actions">
-                  <button type="submit" disabled={!superAdminToken}>
-                    Tạo tenant
-                  </button>
-                </div>
-              </form>
-            </section>
-
-            <section className="superadmin-section">
-              <h4>Thêm quản trị viên đầu tiên</h4>
-              <form className="superadmin-form" onSubmit={handleCreateTenantAdmin}>
-                <label>
-                  Tenant
-                  <select
-                    value={selectedTenantForAdmin}
-                    onChange={(event) => setSelectedTenantForAdmin(event.target.value)}
-                    disabled={!superAdminToken}
-                  >
-                    <option value="" disabled>
-                      Chọn tenant
-                    </option>
-                    {superAdminTenants.map((tenant) => (
-                      <option key={tenant.id} value={tenant.id}>
-                        {tenant.name} ({tenant.id})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Tài khoản quản trị
-                  <input value={newTenantAdminId} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantAdminId(event.target.value)} placeholder="Ví dụ: admin:tenant" />
-                </label>
-                <label>
-                  Tên hiển thị
-                  <input value={newTenantAdminName} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantAdminName(event.target.value)} placeholder="Tên quản trị viên" />
-                </label>
-                <label>
-                  Mật khẩu
-                  <input type="password" value={newTenantAdminPassword} onChange={(event: ChangeEvent<HTMLInputElement>) => setNewTenantAdminPassword(event.target.value)} placeholder="Mật khẩu đăng nhập" />
-                </label>
-                {createTenantAdminError && <p className="create-card__error">{createTenantAdminError}</p>}
-                {createTenantAdminSuccess && <p className="create-card__success">{createTenantAdminSuccess}</p>}
-                <div className="superadmin-actions">
-                  <button type="submit" disabled={!superAdminToken}>
-                    Tạo quản trị viên
-                  </button>
-                </div>
-              </form>
-            </section>
-          </div>
-        </div>
-      )}
-    </div>
+      <LoginOverlay
+        visible={loginOverlayVisible}
+        loginMode={loginMode}
+        onLoginModeChange={setLoginMode}
+        tenantOptions={tenantOptions}
+        tenantSelectStyles={tenantSelectStyles}
+        selectedTenant={selectedLoginTenant}
+        onSelectTenant={setSelectedLoginTenant}
+        isLoadingTenants={isLoadingTenants}
+        userOptions={userOptions}
+        userSelectStyles={userSelectStyles}
+        selectedUser={selectedLoginUser}
+        onSelectUser={setSelectedLoginUser}
+        isLoadingTenantDirectory={isLoadingTenantDirectory}
+        tenantDirectoryError={tenantDirectoryError}
+        loginSecret={loginSecret}
+        onLoginSecretChange={setLoginSecret}
+        onLogin={handleLogin}
+        isAuthenticating={isAuthenticating}
+        authError={authError}
+        superAdminUsername={superAdminUsername}
+        onSuperAdminUsernameChange={setSuperAdminUsername}
+        superAdminPassword={superAdminPassword}
+        onSuperAdminPasswordChange={setSuperAdminPassword}
+        superAdminStatusMessage={superAdminStatusMessage}
+        superAdminError={superAdminError}
+        onSuperAdminLogin={handleSuperAdminLogin}
+        isAuthenticatingSuperAdmin={isAuthenticatingSuperAdmin}
+        isSuperAdminEnabled={isSuperAdminEnabled}
+        superAdminToken={superAdminToken}
+        onOpenSuperAdmin={() => setIsSuperAdminOpen(true)}
+      />
+      <SuperAdminDialog
+        isOpen={isSuperAdminOpen}
+        onClose={closeSuperAdmin}
+        superAdminUsername={superAdminUsername}
+        onSuperAdminUsernameChange={setSuperAdminUsername}
+        superAdminPassword={superAdminPassword}
+        onSuperAdminPasswordChange={setSuperAdminPassword}
+        onSuperAdminLogin={handleSuperAdminLogin}
+        isSuperAdminEnabled={isSuperAdminEnabled}
+        isAuthenticatingSuperAdmin={isAuthenticatingSuperAdmin}
+        superAdminToken={superAdminToken}
+        superAdminStatusMessage={superAdminStatusMessage}
+        superAdminError={superAdminError}
+        onSuperAdminLogout={handleSuperAdminLogout}
+        onRefreshTenants={refreshSuperAdminTenants}
+        isLoadingSuperAdmin={isLoadingSuperAdmin}
+        superAdminTenants={superAdminTenants}
+        createTenantError={createTenantError}
+        createTenantSuccess={createTenantSuccess}
+        newTenantId={newTenantId}
+        onNewTenantIdChange={setNewTenantId}
+        newTenantName={newTenantName}
+        onNewTenantNameChange={setNewTenantName}
+        newTenantClientId={newTenantClientId}
+        onNewTenantClientIdChange={setNewTenantClientId}
+        newTenantApiKey={newTenantApiKey}
+        onNewTenantApiKeyChange={setNewTenantApiKey}
+        newTenantPlan={newTenantPlan}
+        onNewTenantPlanChange={setNewTenantPlan}
+        onCreateTenant={handleCreateTenant}
+        createTenantAdminError={createTenantAdminError}
+        createTenantAdminSuccess={createTenantAdminSuccess}
+        selectedTenantForAdmin={selectedTenantForAdmin}
+        onSelectTenantForAdmin={setSelectedTenantForAdmin}
+        newTenantAdminId={newTenantAdminId}
+        onNewTenantAdminIdChange={setNewTenantAdminId}
+        newTenantAdminName={newTenantAdminName}
+        onNewTenantAdminNameChange={setNewTenantAdminName}
+        newTenantAdminPassword={newTenantAdminPassword}
+        onNewTenantAdminPasswordChange={setNewTenantAdminPassword}
+        onCreateTenantAdmin={handleCreateTenantAdmin}
+      />
+      </div>
+    </Theme>
   );
 }
