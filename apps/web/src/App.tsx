@@ -230,6 +230,7 @@ export default function App() {
   const [showStickers, setShowStickers] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [loginMode, setLoginMode] = useState<'tenant' | 'superadmin'>('tenant');
   const [loginSecret, setLoginSecret] = useState('');
   const [selectedLoginUser, setSelectedLoginUser] = useState<UserOption | null>(null);
   const [sessionUser, setSessionUser] = useState<{ userId: string; displayName: string; roles: string[] } | null>(null);
@@ -366,6 +367,20 @@ export default function App() {
     setIsSuperAdminOpen(false);
     handleSuperAdminLogout();
   }, [handleSuperAdminLogout]);
+
+  useEffect(() => {
+    if (superAdminToken && !isSuperAdminOpen) {
+      setIsSuperAdminOpen(true);
+    }
+  }, [superAdminToken, isSuperAdminOpen]);
+
+  useEffect(() => {
+    if (loginMode === 'tenant') {
+      setSuperAdminError(null);
+    } else {
+      setAuthError(null);
+    }
+  }, [loginMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1996,40 +2011,124 @@ export default function App() {
       {!isAuthenticated && (
         <div className="login-overlay" role="dialog" aria-modal="true">
           <div className="login-dialog">
-            <form className="login-card" onSubmit={handleLogin}>
-              <h2>Đăng nhập vào VIChat</h2>
-              <p className="login-helper">Chọn tài khoản sẵn có và nhập mật khẩu để bắt đầu trò chuyện.</p>
-              <label>
-                Tài khoản
-                <Select<UserOption>
-                  classNamePrefix="rs"
-                  styles={sharedSelectStyles as StylesConfig<UserOption, false>}
-                  options={userOptions}
-                  value={selectedLoginUser}
-                  onChange={(option) => setSelectedLoginUser((option as SingleValue<UserOption>) ?? null)}
-                  placeholder="Chọn tài khoản của bạn"
-                  formatOptionLabel={(option: UserOption) => (
-                    <span className="user-option__name-only">{option.label}</span>
+            <div className="login-card">
+              <div className="login-toggle" role="tablist" aria-label="Chọn phương thức đăng nhập">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={loginMode === 'tenant'}
+                  className={loginMode === 'tenant' ? 'login-toggle__button login-toggle__button--active' : 'login-toggle__button'}
+                  onClick={() => setLoginMode('tenant')}
+                >
+                  Người dùng tenant
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={loginMode === 'superadmin'}
+                  className={
+                    loginMode === 'superadmin'
+                      ? 'login-toggle__button login-toggle__button--active'
+                      : 'login-toggle__button'
+                  }
+                  onClick={() => setLoginMode('superadmin')}
+                >
+                  Superadmin
+                </button>
+              </div>
+
+              {loginMode === 'tenant' ? (
+                <form className="login-card__form" onSubmit={handleLogin}>
+                  <h2>Đăng nhập vào VIChat</h2>
+                  <p className="login-helper">Chọn tài khoản sẵn có và nhập mật khẩu để bắt đầu trò chuyện.</p>
+                  <label>
+                    Tài khoản
+                    <Select<UserOption>
+                      classNamePrefix="rs"
+                      styles={sharedSelectStyles as StylesConfig<UserOption, false>}
+                      options={userOptions}
+                      value={selectedLoginUser}
+                      onChange={(option) => setSelectedLoginUser((option as SingleValue<UserOption>) ?? null)}
+                      placeholder="Chọn tài khoản của bạn"
+                      formatOptionLabel={(option: UserOption) => (
+                        <span className="user-option__name-only">{option.label}</span>
+                      )}
+                      isLoading={!userOptions.length}
+                      noOptionsMessage={() => 'Chưa có người dùng khả dụng'}
+                    />
+                  </label>
+                  <label>
+                    Mật khẩu
+                    <input
+                      type="password"
+                      value={loginSecret}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setLoginSecret(event.target.value)}
+                      placeholder="Nhập mật khẩu để đăng nhập"
+                      autoComplete="current-password"
+                    />
+                  </label>
+                  {authError && <p className="login-error">{authError}</p>}
+                  <button type="submit" disabled={isAuthenticating}>
+                    {isAuthenticating ? 'Đang đăng nhập...' : 'Đăng nhập'}
+                  </button>
+                </form>
+              ) : (
+                <form className="login-card__form" onSubmit={handleSuperAdminLogin}>
+                  <h2>Đăng nhập Superadmin</h2>
+                  <p className="login-helper login-helper--left">
+                    Superadmin dùng để cấu hình tenant và tạo quản trị viên đầu tiên cho từng đơn vị.
+                  </p>
+                  <label>
+                    Tài khoản superadmin
+                    <input
+                      value={superAdminUsername}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminUsername(event.target.value)}
+                      placeholder="Ví dụ: superadmin"
+                      autoComplete="username"
+                      disabled={isSuperAdminEnabled !== true}
+                    />
+                  </label>
+                  <label>
+                    Mật khẩu
+                    <input
+                      type="password"
+                      value={superAdminPassword}
+                      onChange={(event: ChangeEvent<HTMLInputElement>) => setSuperAdminPassword(event.target.value)}
+                      placeholder="Nhập mật khẩu superadmin"
+                      autoComplete="current-password"
+                      disabled={isSuperAdminEnabled !== true}
+                    />
+                  </label>
+                  <small className="login-hint">{superAdminStatusMessage}</small>
+                  {superAdminError && <p className="login-error">{superAdminError}</p>}
+                  <div className="login-actions">
+                    <button
+                      type="submit"
+                      disabled={isAuthenticatingSuperAdmin || isSuperAdminEnabled !== true}
+                    >
+                      {isAuthenticatingSuperAdmin
+                        ? 'Đang đăng nhập...'
+                        : superAdminToken
+                        ? 'Đăng nhập lại'
+                        : 'Đăng nhập'}
+                    </button>
+                    <button
+                      type="button"
+                      className="login-card__secondary-action"
+                      onClick={() => setIsSuperAdminOpen(true)}
+                      disabled={!superAdminToken}
+                    >
+                      Mở bảng điều khiển
+                    </button>
+                  </div>
+                  {superAdminToken && (
+                    <p className="login-success">
+                      Đã đăng nhập superadmin, bạn có thể mở bảng điều khiển để quản lý tenant.
+                    </p>
                   )}
-                  isLoading={!userOptions.length}
-                  noOptionsMessage={() => 'Chưa có người dùng khả dụng'}
-                />
-              </label>
-              <label>
-                Mật khẩu
-                <input
-                  type="password"
-                  value={loginSecret}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setLoginSecret(event.target.value)}
-                  placeholder="Nhập mật khẩu để đăng nhập"
-                  autoComplete="current-password"
-                />
-              </label>
-              {authError && <p className="login-error">{authError}</p>}
-              <button type="submit" disabled={isAuthenticating}>
-                {isAuthenticating ? 'Đang đăng nhập...' : 'Đăng nhập'}
-              </button>
-            </form>
+                </form>
+              )}
+            </div>
 
             <div className="login-divider" aria-hidden>
               <span>Quản trị</span>
@@ -2038,8 +2137,7 @@ export default function App() {
             <div className="login-card login-card--secondary login-card--info">
               <h2>Quản lý người dùng</h2>
               <p className="login-helper">
-                Mỗi tenant cần ít nhất một quản trị viên để thêm người dùng mới. Đăng nhập bằng tài khoản quản trị để
-                thực hiện thao tác này.
+                Sau khi đăng nhập superadmin, bạn có thể thêm tenant và người dùng đầu tiên cho từng đơn vị.
               </p>
               <button
                 type="button"
@@ -2048,7 +2146,11 @@ export default function App() {
               >
                 Mở màn hình Superadmin
               </button>
-              <small className="login-hint">Superadmin được sử dụng để tạo tenant và quản trị viên đầu tiên.</small>
+              <small className="login-hint">
+                {superAdminToken
+                  ? 'Đang đăng nhập superadmin. Mở màn hình để quản lý tenant ngay.'
+                  : 'Đăng nhập bằng tài khoản superadmin để kích hoạt bảng điều khiển quản trị.'}
+              </small>
             </div>
           </div>
         </div>
